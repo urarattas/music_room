@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>音乐听歌房 · Music Room</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎵</text></svg>" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- 顶部栏 -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">🎵</span>
+        <span class="brand-name">音乐听歌房</span>
+      </div>
+      <div class="room-info">
+        <span class="room-label">房间</span>
+        <input id="room-input" class="room-input" maxlength="32" placeholder="房间名" />
+        <button id="room-join" class="btn btn-ghost" title="切换房间">进入</button>
+        <button id="copy-link" class="btn btn-ghost" title="复制房间链接">🔗 邀请</button>
+      </div>
+      <div class="topbar-right">
+        <input id="name-input" class="name-input" maxlength="16" placeholder="你的昵称" />
+        <span id="conn-state" class="conn-state offline">未连接</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <!-- 左栏：搜索与歌单 -->
+      <aside class="panel panel-left">
+        <section class="block">
+          <h2 class="block-title">歌曲搜索</h2>
+          <form id="search-form" class="search-form">
+            <input id="search-input" class="input" placeholder="歌名 / 歌手 / 专辑" autocomplete="off" />
+            <select id="search-source" class="select">
+              <option value="netease">网易云</option>
+              <option value="joox">Joox</option>
+              <option value="bilibili">B站</option>
+            </select>
+            <button class="btn btn-primary" type="submit">搜索</button>
+          </form>
+          <div id="search-status" class="hint"></div>
+          <ul id="search-results" class="track-list"></ul>
+        </section>
+
+        <section class="block">
+          <h2 class="block-title">
+            播放队列 <span id="playlist-count" class="badge">0</span>
+          </h2>
+          <ul id="playlist" class="track-list"></ul>
+        </section>
+      </aside>
+
+      <!-- 中栏：播放器与歌词 -->
+      <section class="panel panel-center">
+        <div class="now-playing">
+          <div class="cover-wrap">
+            <img id="cover" class="cover" alt="封面" />
+            <div id="cover-placeholder" class="cover placeholder">♪</div>
+          </div>
+          <div class="np-meta">
+            <div id="np-title" class="np-title">未在播放</div>
+            <div id="np-artist" class="np-artist">—</div>
+            <div id="np-album" class="np-album">—</div>
+          </div>
+        </div>
+
+        <div class="player-controls">
+          <button id="btn-prev" class="btn btn-round" title="上一首">⏮</button>
+          <button id="btn-play" class="btn btn-round btn-play" title="播放/暂停">▶</button>
+          <button id="btn-next" class="btn btn-round" title="下一首">⏭</button>
+        </div>
+
+        <div class="progress-row">
+          <span id="time-current" class="time">00:00</span>
+          <input id="seek" class="seek" type="range" min="0" max="1000" value="0" step="1" />
+          <span id="time-total" class="time">00:00</span>
+        </div>
+
+        <div class="volume-row">
+          <span title="音量">🔊</span>
+          <input id="volume" class="volume" type="range" min="0" max="100" value="80" />
+          <span id="volume-label" class="time">80%</span>
+        </div>
+
+        <div id="lyric-box" class="lyric-box">
+          <div class="lyric-tabs">
+            <button class="lyric-tab active" data-mode="lyric">原文</button>
+            <button class="lyric-tab" data-mode="tlyric">翻译</button>
+          </div>
+          <div id="lyric-list" class="lyric-list">
+            <div class="lyric-empty">暂无歌词</div>
+          </div>
+        </div>
+
+        <audio id="audio" preload="auto"></audio>
+      </section>
+
+      <!-- 右栏：成员与聊天 -->
+      <aside class="panel panel-right">
+        <section class="block members-block">
+          <h2 class="block-title">
+            房间成员 <span id="member-count" class="badge">0</span>
+          </h2>
+          <ul id="members" class="members"></ul>
+          <div class="mic-actions">
+            <button id="btn-mic" class="btn btn-ghost">🎙 开麦</button>
+            <span id="mic-hint" class="hint">开麦后成员之间可语音聊天</span>
+          </div>
+          <div class="mic-meter">
+            <div id="mic-level" class="mic-level"></div>
+          </div>
+        </section>
+
+        <section class="block chat-block">
+          <h2 class="block-title">聊天</h2>
+          <div id="chat-list" class="chat-list"></div>
+          <form id="chat-form" class="chat-form">
+            <input id="chat-input" class="input" placeholder="说点什么…" maxlength="500" autocomplete="off" />
+            <button class="btn btn-primary" type="submit">发送</button>
+          </form>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>

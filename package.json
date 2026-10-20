@@ -1,0 +1,29 @@
+{
+  "name": "music-room",
+  "version": "0.1.0",
+  "private": true,
+  "description": "在线多人音乐听歌房：音乐由 GD Studio 音乐台 API 提供，用户之间 WebRTC P2P 语音 + 文字聊天",
+  "type": "module",
+  "main": "server/index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
+  },
+  "keywords": [
+    "webrtc",
+    "music",
+    "chat",
+    "websocket"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "puppeteer-core": "^25.14.0"
+  }
+}
