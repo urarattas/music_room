@@ -209,3 +209,45 @@ test('麦克风状态广播', async () => {
   a.close();
   b.close();
 });
+
+test('切换房间：离开旧房间并加入新房间', async () => {
+  const a = new TestClient('甲', 'old-room');
+  const b = new TestClient('乙', 'old-room');
+  await a.connect();
+  await b.connect();
+  await a.waitFor((m) => m.t === 'welcome');
+  await b.waitFor((m) => m.t === 'welcome');
+  await a.waitFor((m) => m.t === 'users' && m.users.length === 2);
+
+  // 甲切到新房间
+  a.send('join', { room: 'new-room', name: '甲' });
+  const welcome = await a.waitFor((m) => m.t === 'welcome' && m.room.id === 'new-room');
+  assert.equal(welcome.room.id, 'new-room');
+  assert.equal(welcome.users.length, 1, '新房间里只有自己');
+
+  // 旧房间只剩乙
+  const users = await b.waitFor((m) => m.t === 'users' && m.users.length === 1);
+  assert.equal(users.users.length, 1);
+
+  a.close();
+  b.close();
+});
+
+test('封面接口可用并返回图片', async () => {
+  const res = await fetch(`${BASE}/img/pic?source=netease&id=109951163038292176&size=300`);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type') || '', /image/);
+  const buf = Buffer.from(await res.arrayBuffer());
+  assert.ok(buf.length > 1000, '封面应有内容');
+  // JPEG 魔数
+  assert.equal(buf[0], 0xff);
+  assert.equal(buf[1], 0xd8);
+});
+
+test('歌词接口返回原文与翻译', async () => {
+  const res = await fetch(`${BASE}/api/lyric?source=netease&id=451703096`);
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.ok(data.lyric.includes('['), '应返回 LRC 原文');
+  assert.ok(typeof data.tlyric === 'string');
+});

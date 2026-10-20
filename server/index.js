@@ -12,6 +12,7 @@ import { WebSocketServer } from 'ws';
 
 import { musicApi } from './music.js';
 import { RoomRegistry } from './rooms.js';
+import { getCachedCover, storeCover } from './cover-cache.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '..', 'public');
@@ -108,6 +109,8 @@ async function handleApi(req, res, url) {
       count: Math.min(50, Number(q.get('count')) || 20),
       pages: Math.max(1, Number(q.get('pages')) || 1),
     });
+    // 立即返回，不等待封面 —— 封面由前端渐进加载（/img/pic），
+    // 否则 20+ 个封面请求会把上游配额耗尽，拖垮播放与歌词。
     return sendJson(res, 200, { list });
   }
   if (p === '/api/url') {
@@ -145,24 +148,64 @@ async function handleApi(req, res, url) {
   return sendJson(res, 404, { error: 'unknown api' });
 }
 
-/** 302 跳转到上游封面，供 <img src> 直接使用 */
+/**
+ * 提供封面图片。
+ *
+ * 优先返回本地缓存的图片（快，且不消耗上游配额）；
+ * 未命中时向上游要地址、把图片存到本地，再返回。
+ */
 async function handlePicRedirect(req, res, url) {
   const q = url.searchParams;
+  const source = q.get('source') || 'netease';
+  const id = q.get('id');
+  const size = Number(q.get('size')) || 300;
+  if (!id) {
+    res.writeHead(400).end();
+    return;
+  }
+  const key = `${source}_${id}_${size}`;
+
+  // 命中本地缓存
+  const cached = getCachedCover(key);
+  if (cached) {
+    await serveCachedImage(res, cached);
+    return;
+  }
+
   try {
-    const r = await musicApi.getTrackPic({
-      source: q.get('source') || 'netease',
-      id: q.get('id'),
-      size: Number(q.get('size')) || 300,
-    });
+    const r = await musicApi.getTrackPic({ source, id, size });
     if (!r.url) {
       res.writeHead(404).end();
       return;
     }
+    // 下载并缓存到本地
+    const local = await storeCover(key, r.url);
+    if (local) {
+      await serveCachedImage(res, local);
+      return;
+    }
+    // 下载失败则直接跳转
     res.writeHead(302, {
       location: r.url,
       'cache-control': 'public, max-age=86400',
     });
     res.end();
+  } catch {
+    res.writeHead(404).end();
+  }
+}
+
+/** 返回本地缓存的图片文件 */
+async function serveCachedImage(res, filePath) {
+  try {
+    const stat = await fsp.stat(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+    res.writeHead(200, {
+      'content-type': MIME[ext] || 'image/jpeg',
+      'content-length': stat.size,
+      'cache-control': 'public, max-age=604800',
+    });
+    fs.createReadStream(filePath).pipe(res);
   } catch {
     res.writeHead(404).end();
   }
@@ -281,11 +324,29 @@ wss.on('connection', (ws, req) => {
     try {
       switch (msg.t) {
         case 'join': {
+          const wantRoom = String(msg.room || 'lobby').trim() || 'lobby';
+
+          // 已经在房间里：先离开旧房间（可能是切换房间）
           if (conn.room) {
-            // 重复 join：忽略
-            break;
+            if (conn.room.id === wantRoom) {
+              // 同一房间重复 join：忽略
+              break;
+            }
+            const old = conn.room;
+            old.removeUser(conn.user.id);
+            broadcast(old, 'chat', {
+              from: { id: 'system', name: '系统' },
+              text: `${conn.user.name} 离开了房间`,
+              ts: Date.now(),
+              system: true,
+            });
+            broadcastUsers(old);
+            if (old.isEmpty()) registry.cleanup();
+            conn.room = null;
+            conn.user = null;
           }
-          const room = registry.join(msg.room || 'lobby', msg.name);
+
+          const room = registry.join(wantRoom, msg.name);
           const user = room.addUser(ws, { name: msg.name });
           conn.user = user;
           conn.room = room;

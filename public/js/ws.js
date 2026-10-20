@@ -63,6 +63,13 @@ export class RoomClient extends EventTarget {
     });
   }
 
+  /** 切换房间：重新发送 join（服务端会先离开旧房间） */
+  switchRoom(room, name) {
+    if (room) this.room = room;
+    if (name) this.name = name;
+    this.send('join', { room: this.room, name: this.name });
+  }
+
   _scheduleReconnect() {
     clearTimeout(this._reconnectTimer);
     this._reconnectTimer = setTimeout(() => {

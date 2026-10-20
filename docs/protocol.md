@@ -43,9 +43,10 @@ MusicState = {
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/search?source=&name=&count=&pages=` | 搜索歌曲，返回 `Track[]` |
+| GET | `/api/search?source=&name=&count=&pages=` | 搜索歌曲，返回 `Track[]`（**不含**封面地址，封面走 `/img/pic`） |
 | GET | `/api/url?source=&id=&br=` | 获取播放地址，返回 `{url, br, size}` |
 | GET | `/api/pic?source=&id=&size=` | 获取封面 URL，返回 `{url}` |
+| GET | `/img/pic?source=&id=&size=` | 返回封面**图片本体**（本地缓存优先），供 `<img src>` 直接使用 |
 | GET | `/api/lyric?source=&id=` | 获取歌词，返回 `{lyric, tlyric}` |
 | GET | `/api/rooms` | 房间列表：`{rooms:[{id,name,users,capacity}]}` |
 | GET | `/api/health` | 健康检查 |
@@ -56,7 +57,7 @@ MusicState = {
 
 | t | 载荷 | 说明 |
 | --- | --- | --- |
-| `join` | `{room, name}` | 加入房间（room 为房间 ID 或房间名） |
+| `join` | `{room, name}` | 加入房间（room 为房间 ID 或房间名）。**若已在房间中且 room 不同**，服务端会先让该成员离开旧房间再加入新房间 |
 | `chat` | `{text}` | 发送文字消息 |
 | `music.play` | `{track, pos?}` | 播放指定曲目（可指定起始位置 ms） |
 | `music.pause` | `{}` | 暂停 |

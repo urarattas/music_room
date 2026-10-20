@@ -13,6 +13,7 @@ export class MusicPlayer extends EventTarget {
       startAt: 0,
       volume: 1,
     };
+    /** 曲目总时长，单位 ms（与 state.pos 保持一致） */
     this.duration = 0;
     this._lastTrackId = null;
     this._correctTimer = null;
@@ -23,7 +24,8 @@ export class MusicPlayer extends EventTarget {
     this.audio.preload = 'auto';
 
     this.audio.addEventListener('loadedmetadata', () => {
-      this.duration = this.audio.duration || 0;
+      // audio.duration 单位是秒，统一换算成毫秒
+      this.duration = Math.max(0, Math.round((this.audio.duration || 0) * 1000));
       this.emit('duration', this.duration);
       this._applyPosition(true);
     });

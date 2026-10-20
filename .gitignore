@@ -10,6 +10,7 @@ Thumbs.db
 dist/
 build/
 coverage/
+.cache/
 .idea/
 .vscode/
 *.pem

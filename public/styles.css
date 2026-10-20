@@ -25,6 +25,82 @@ html, body {
 }
 
 #app { display: flex; flex-direction: column; height: 100vh; }
+.app.hidden { display: none; }
+
+/* ------------------------------- 进入房间 ------------------------------- */
+.gate {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background:
+    radial-gradient(1000px 600px at 15% -10%, rgba(91, 140, 255, .22), transparent 60%),
+    radial-gradient(900px 500px at 85% 110%, rgba(124, 91, 255, .2), transparent 60%),
+    var(--bg);
+  z-index: 100;
+  overflow-y: auto;
+}
+.gate.hidden { display: none; }
+
+.gate-card {
+  width: 100%;
+  max-width: 400px;
+  background: rgba(22, 26, 34, .92);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 32px 28px 24px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .45);
+  text-align: center;
+}
+.gate-logo { font-size: 46px; line-height: 1; }
+.gate-title { margin: 12px 0 6px; font-size: 24px; font-weight: 700; }
+.gate-sub { margin: 0 0 24px; color: var(--text-dim); font-size: 13px; }
+
+.gate-form { display: flex; flex-direction: column; gap: 16px; text-align: left; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field-label { font-size: 12px; color: var(--text-dim); font-weight: 600; }
+.field-hint { font-size: 11px; color: var(--text-dim); }
+.input-lg {
+  width: 100%;
+  padding: 11px 13px;
+  font-size: 15px;
+  border-radius: 10px;
+}
+.btn-lg { width: 100%; padding: 12px; font-size: 15px; border-radius: 10px; margin-top: 4px; }
+.gate-error {
+  min-height: 18px;
+  color: var(--danger);
+  font-size: 12px;
+  text-align: center;
+}
+.gate-rooms {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+}
+.gate-rooms.show { display: flex; }
+.gate-rooms-title { font-size: 12px; color: var(--text-dim); text-align: left; }
+.gate-room-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-soft-2);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+  color: var(--text);
+}
+.gate-room-item:hover { border-color: var(--accent); }
+.gate-room-item .u { color: var(--text-dim); font-size: 11px; }
+.gate-foot { margin: 18px 0 0; font-size: 11px; color: var(--text-dim); }
+.gate-foot a { color: var(--accent); text-decoration: none; }
+.gate-foot a:hover { text-decoration: underline; }
 
 /* ------------------------------- 顶栏 ------------------------------- */
 .topbar {

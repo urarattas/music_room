@@ -4,10 +4,21 @@ import { ChatPanel } from './chat.js';
 import { SearchPanel } from './search.js';
 import { VoiceRoom } from './rtc.js';
 import { LyricPanel } from './lyrics.js';
+import { coverLoader } from './cover-loader.js';
 
 const $ = (id) => document.getElementById(id);
 
 const el = {
+  // 进入房间
+  gate: $('gate'),
+  gateForm: $('gate-form'),
+  gateName: $('gate-name'),
+  gateRoom: $('gate-room'),
+  gateError: $('gate-error'),
+  gateEnter: $('gate-enter'),
+  gateRooms: $('gate-rooms'),
+  app: $('app'),
+  // 主界面
   roomInput: $('room-input'),
   roomJoin: $('room-join'),
   copyLink: $('copy-link'),
@@ -53,19 +64,74 @@ const urlRoom = params.get('room');
 let roomName = urlRoom || localStorage.getItem(STORAGE.room) || '大厅';
 let userName = localStorage.getItem(STORAGE.name) || '';
 
-el.roomInput.value = roomName;
-el.nameInput.value = userName;
-el.nameInput.placeholder = userName || '你的昵称';
+/* ------------------------------ 进入房间流程 ------------------------------ */
 
-if (!userName) {
-  userName = `听众${Math.floor(Math.random() * 900 + 100)}`;
-  el.nameInput.value = userName;
+/** 预填上次使用的昵称与房间 */
+el.gateName.value = userName;
+el.gateRoom.value = roomName;
+el.gateName.focus();
+
+el.gateForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = el.gateName.value.trim();
+  const room = el.gateRoom.value.trim();
+  if (!name) {
+    el.gateError.textContent = '请输入你的昵称';
+    el.gateName.focus();
+    return;
+  }
+  if (!room) {
+    el.gateError.textContent = '请输入房间号';
+    el.gateRoom.focus();
+    return;
+  }
+  el.gateError.textContent = '';
+  userName = name;
+  roomName = room;
   localStorage.setItem(STORAGE.name, userName);
+  localStorage.setItem(STORAGE.room, roomName);
+  enterRoom();
+});
+
+/** 显示当前活跃的房间，方便快速加入 */
+async function loadActiveRooms() {
+  try {
+    const res = await fetch('/api/rooms');
+    if (!res.ok) return;
+    const { rooms } = await res.json();
+    const active = (rooms || []).filter((r) => r.users > 0);
+    if (!active.length) return;
+    el.gateRooms.innerHTML = '';
+    const title = document.createElement('div');
+    title.className = 'gate-rooms-title';
+    title.textContent = '当前有人的房间';
+    el.gateRooms.appendChild(title);
+    for (const r of active) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'gate-room-item';
+      const nm = document.createElement('span');
+      nm.textContent = r.name;
+      const cnt = document.createElement('span');
+      cnt.className = 'u';
+      cnt.textContent = `${r.users} 人`;
+      item.append(nm, cnt);
+      item.onclick = () => {
+        el.gateRoom.value = r.name;
+        el.gateRoom.focus();
+      };
+      el.gateRooms.appendChild(item);
+    }
+    el.gateRooms.classList.add('show');
+  } catch {
+    /* 忽略 */
+  }
 }
+loadActiveRooms();
 
 /* ------------------------------ 客户端实例 ------------------------------ */
 
-const client = new RoomClient({ room: roomName, name: userName, autoJoin: true });
+const client = new RoomClient({ room: roomName, name: userName, autoJoin: false });
 const player = new MusicPlayer({ client, audioEl: el.audio });
 const voice = new VoiceRoom({ client });
 const lyrics = new LyricPanel({ listEl: el.lyricList, tabsEl: el.lyricTabs });
@@ -96,6 +162,7 @@ const search = new SearchPanel({
     client.send('playlist.add', { track });
     el.searchStatus.textContent = `已加入队列：${track.name}`;
   },
+  coverLoader,
 });
 
 /* ------------------------------ 连接状态 ------------------------------ */
@@ -103,6 +170,32 @@ const search = new SearchPanel({
 function setConnState(online) {
   el.connState.textContent = online ? '已连接' : '未连接';
   el.connState.className = 'conn-state ' + (online ? 'online' : 'offline');
+}
+
+/* ------------------------------ 进入房间 ------------------------------ */
+
+/** 隐藏入口页、连接房间并显示主界面 */
+function enterRoom() {
+  el.gate.classList.add('hidden');
+  el.app.classList.remove('hidden');
+
+  el.roomInput.value = roomName;
+  el.nameInput.value = userName;
+  el.nameInput.placeholder = userName;
+
+  client.room = roomName;
+  client.name = userName;
+  client.autoJoin = true;
+  if (client.connected) {
+    // 已在连接中，直接入房
+    client.switchRoom(roomName, userName);
+  } else {
+    client.connect();
+  }
+  // 同步地址栏，方便分享
+  const url = new URL(location.href);
+  url.searchParams.set('room', roomName);
+  history.replaceState(null, '', url);
 }
 
 /* ------------------------------ 播放控制 ------------------------------ */
@@ -120,6 +213,7 @@ el.seek.addEventListener('pointerdown', () => (seeking = true));
 el.seek.addEventListener('pointerup', () => (seeking = false));
 el.seek.addEventListener('input', () => {
   if (!player.duration) return;
+  // player.duration 单位是 ms
   const pos = (Number(el.seek.value) / 1000) * player.duration;
   el.timeCurrent.textContent = fmtTime(pos);
 });
@@ -158,7 +252,8 @@ player.on('state', (state) => {
   el.volume.value = Math.round((state.volume ?? 1) * 100);
   el.volumeLabel.textContent = `${el.volume.value}%`;
   if (t?.pic_id) {
-    el.cover.src = `/img/pic?source=${encodeURIComponent(t.source)}&id=${encodeURIComponent(t.pic_id)}&size=500`;
+    // 当前播放的封面优先级最高
+    coverLoader.push(el.cover, { source: t.source, pic_id: t.pic_id, size: 500 }, 0);
     el.cover.classList.add('visible');
     el.coverPlaceholder.style.display = 'none';
   } else {
@@ -169,6 +264,7 @@ player.on('state', (state) => {
 
 player.on('duration', (d) => {
   el.timeTotal.textContent = fmtTime(d);
+  el.seek.disabled = !d;
 });
 
 player.on('time', (pos) => {
@@ -290,8 +386,8 @@ function renderPlaylist(list) {
     const img = document.createElement('img');
     img.alt = '';
     if (track.pic_id) {
-      img.src = `/img/pic?source=${encodeURIComponent(track.source)}&id=${encodeURIComponent(track.pic_id)}&size=300`;
-      img.onerror = () => img.remove();
+      // 播放列表通常很短，直接请求即可
+      coverLoader.push(img, { source: track.source, pic_id: track.pic_id, size: 300 }, idx);
     }
     const meta = document.createElement('div');
     meta.className = 'track-meta';
@@ -367,12 +463,18 @@ voice.on('peers', (peers) => {
 
 el.roomJoin.onclick = () => {
   const next = el.roomInput.value.trim() || '大厅';
-  if (next === roomName) return;
+  if (next === roomName) {
+    el.micHint.textContent = '已经在该房间中';
+    return;
+  }
   roomName = next;
   localStorage.setItem(STORAGE.room, next);
-  client.room = next;
-  client.close();
-  setTimeout(() => client.connect(), 200);
+  const url = new URL(location.href);
+  url.searchParams.set('room', next);
+  history.replaceState(null, '', url);
+  // 复用同一连接切换房间
+  client.switchRoom(roomName, userName);
+  el.micHint.textContent = `已切换到房间「${roomName}」`;
 };
 
 el.nameInput.onchange = () => {
@@ -401,6 +503,6 @@ el.copyLink.onclick = async () => {
 window.__client = client;
 window.__voice = voice;
 window.__player = player;
+window.__enterRoom = enterRoom;
 
-client.connect();
 window.addEventListener('beforeunload', () => client.close());

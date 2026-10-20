@@ -5,9 +5,10 @@
 ## `ws.js` — `export class RoomClient`
 
 ```js
-const client = new RoomClient({ room: 'room-id', name: '昵称' });
+const client = new RoomClient({ room: 'room-id', name: '昵称', autoJoin: false });
 client.connect();                      // 连接 ws(s)://<host>/ws
 client.send('chat', { text: 'hello' });
+client.switchRoom('new-room', '昵称');  // 切换房间（复用同一连接）
 client.on('eventName', (payload) => {});  // 事件: welcome users chat music playlist signal mic error room pong
 client.close();
 client.offsetMs;                       // 客户端时钟 -> 服务端时钟 的偏移估计
@@ -33,8 +34,10 @@ const player = new MusicPlayer({ client, audioEl });
 player.play(); player.pause(); player.seek(ms); player.setVolume(0..1);
 player.on('state', (state) => {});   // 内部同步后的状态
 player.on('time', (posMs) => {});    // 时间轴 tick
+player.on('duration', (ms) => {});   // 曲目总时长（毫秒）
 player.on('track', (track) => {});   // 当前曲目变化
 player.state;                        // { track, playing, pos, startAt, volume }
+player.duration;                     // 曲目总时长，**单位毫秒**（与 state.pos 一致）
 ```
 
 职责：
@@ -42,6 +45,8 @@ player.state;                        // { track, playing, pos, startAt, volume }
 - 音频地址为跨域 URL，播放前需 `audio.crossOrigin = 'anonymous'`；
   若上游拒绝 CORS 导致 `MediaError`，降级为不带 crossOrigin 播放（此时歌词/进度仍可用）。
 - 曲目切换时自动暂停旧音源、加载新音源、seek 到目标位置。
+- **单位约定**：`audio.duration` 原始单位是秒，此处统一换算为毫秒后再暴露，
+  避免与 `state.pos` 混用导致进度条计算错误。
 
 ## `rtc.js` — `export class VoiceRoom`（由 rtc 负责实现）
 
@@ -71,10 +76,39 @@ const search = new SearchPanel({ listEl, inputEl, onPick: (track) => {} });
 - 通过 `GET /api/search?source=&name=&count=&pages=` 搜索。
 - 展示歌名 / 歌手 / 专辑 / 封面，点击回调 `onPick(track)`。
 
+## `cover-loader.js` — `export class CoverLoader`
+
+```js
+const loader = new CoverLoader({ concurrency: 3 });
+loader.push(img, { source: 'netease', pic_id: '10995...', size: 300 }, priority);
+```
+
+- 并发限制为 3，避免 30 个封面请求同时打爆上游配额。
+- 按 `priority` 排序（数字越小越先），当前播放的封面 priority = 0。
+- `isVisible(el, container, margin)` 判断元素是否在容器可视区域内，
+  搜索列表据此**只为可见条目**请求封面，滚动时再补。
+
+## `lyrics.js` — `export class LyricPanel`
+
+```js
+const panel = new LyricPanel({ listEl, tabsEl });
+panel.setLyrics({ lyric, tlyric });   // LRC 原文与翻译
+panel.update(posMs);                  // 高亮当前行并居中滚动
+panel.clear();
+export function parseLrc(lrc);        // → [{time, text}]
+```
+
+- 翻译模式按**原文行的时间轴**对齐，原文缺失对应翻译时用原文兜底，
+  保证切换标签页时行数一致、高亮同步。
+
 ## `main.js` — 应用装配
 
+- **入口页流程**：默认显示 `#gate`（昵称 + 房间号），提交后隐藏入口页、
+  显示 `#app` 并连接房间；URL 中的 `?room=` 会预填房间号。
+  入口页还会拉取 `/api/rooms` 列出当前有人的房间，点击可快速填入。
 - 读取 `localStorage` 中的昵称与上次房间名。
-- 创建 `RoomClient`、`MusicPlayer`、`ChatPanel`、`SearchPanel`、`VoiceRoom`。
+- 创建 `RoomClient`、`MusicPlayer`、`ChatPanel`、`SearchPanel`、`VoiceRoom`、`LyricPanel`。
 - 处理 `welcome` 中的 `users` / `playlist` / `music` 初始状态。
-- 渲染成员列表（头像首字母、麦克风图标、房主标记）。
+- 渲染成员列表（头像首字母、麦克风图标、"我"标记）。
+- 顶部房间号改动后调用 `client.switchRoom(room, name)` 切换房间，无需刷新。
 - 提供"开麦/关麦"按钮与房间分享链接。

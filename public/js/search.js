@@ -1,6 +1,8 @@
 /** 搜索面板 */
+import { isVisible } from './cover-loader.js';
+
 export class SearchPanel {
-  constructor({ listEl, formEl, inputEl, sourceEl, statusEl, onPick, onAdd }) {
+  constructor({ listEl, formEl, inputEl, sourceEl, statusEl, onPick, onAdd, coverLoader }) {
     this.listEl = listEl;
     this.formEl = formEl;
     this.inputEl = inputEl;
@@ -8,12 +10,39 @@ export class SearchPanel {
     this.statusEl = statusEl;
     this.onPick = onPick || (() => {});
     this.onAdd = onAdd || (() => {});
+    this.coverLoader = coverLoader || null;
     this.results = [];
 
     this.formEl.addEventListener('submit', (e) => {
       e.preventDefault();
       this.search(1);
     });
+
+    // 滚动时补充加载可视区域内的封面
+    this.listEl.addEventListener('scroll', () => this._loadVisibleCovers());
+  }
+
+  /** 只为可视区域内的条目加载封面，避免一次拉几十张 */
+  _loadVisibleCovers() {
+    if (!this.coverLoader) return;
+    const items = this.listEl.querySelectorAll('.track-item');
+    let priority = 0;
+    for (const li of items) {
+      const img = li.querySelector('img');
+      if (!img || img.dataset.coverState) continue;
+      if (!isVisible(li, this.listEl)) continue;
+      const idx = Number(img.dataset.index ?? priority);
+      this.coverLoader.push(img, this._trackOf(img), idx);
+      priority++;
+    }
+  }
+
+  _trackOf(img) {
+    try {
+      return JSON.parse(img.dataset.track);
+    } catch {
+      return null;
+    }
   }
 
   async search(pages = 1) {
@@ -50,7 +79,7 @@ export class SearchPanel {
 
   render() {
     this.listEl.innerHTML = '';
-    for (const track of this.results) {
+    this.results.forEach((track, idx) => {
       const li = document.createElement('li');
       li.className = 'track-item';
 
@@ -58,10 +87,13 @@ export class SearchPanel {
       img.alt = '';
       img.loading = 'lazy';
       img.decoding = 'async';
+      img.dataset.index = String(idx);
       if (track.pic_id) {
-        // 服务端对上游请求做了串行化与缓存，这里直接加载即可
-        img.src = `/img/pic?source=${encodeURIComponent(track.source)}&id=${encodeURIComponent(track.pic_id)}&size=300`;
-        img.onerror = () => img.remove();
+        img.dataset.track = JSON.stringify({ source: track.source, pic_id: track.pic_id });
+        if (!this.coverLoader) {
+          img.src = `/img/pic?source=${encodeURIComponent(track.source)}&id=${encodeURIComponent(track.pic_id)}&size=300`;
+          img.onerror = () => img.remove();
+        }
       }
 
       const meta = document.createElement('div');
@@ -97,6 +129,9 @@ export class SearchPanel {
       li.append(img, meta, actions);
       li.onclick = () => this.onPick(track);
       this.listEl.appendChild(li);
-    }
+    });
+
+    // 元素已入 DOM，现在才能判断是否在可视区域内
+    this._loadVisibleCovers();
   }
 }

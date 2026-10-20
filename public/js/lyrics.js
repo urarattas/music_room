@@ -27,7 +27,7 @@ export class LyricPanel {
     this.translation = new Map();
     const tLines = parseLrc(data?.tlyric || '');
     for (const l of tLines) {
-      // 翻译行的时间与原文对齐（取最接近的行）
+      // 翻译行与原文行时间戳一一对应
       this.translation.set(l.time, l.text);
     }
     this.activeIndex = -1;
@@ -41,6 +41,27 @@ export class LyricPanel {
     this._render();
   }
 
+  /** 当前模式下要展示的行 */
+  _source() {
+    if (this.mode === 'tlyric' && this.translation.size) {
+      // 翻译行按原文行的时间轴排列，保证高亮同步
+      const out = [];
+      for (const l of this.lines) {
+        const text = this.translation.get(l.time);
+        if (text !== undefined) out.push({ time: l.time, text });
+      }
+      // 原文中找不到对应翻译的行，用原文兜底，保证行数一致
+      if (out.length !== this.lines.length) {
+        for (const l of this.lines) {
+          if (!out.some((o) => o.time === l.time)) out.push({ time: l.time, text: l.text });
+        }
+        out.sort((a, b) => a.time - b.time);
+      }
+      return out;
+    }
+    return this.lines;
+  }
+
   _render() {
     this.listEl.innerHTML = '';
     if (!this.lines.length) {
@@ -50,8 +71,7 @@ export class LyricPanel {
       this.listEl.appendChild(empty);
       return;
     }
-    const source = this.mode === 'tlyric' && this.translation.size ? this.translation : this.lines;
-    for (const l of source) {
+    for (const l of this._source()) {
       const div = document.createElement('div');
       div.className = 'lyric-line';
       div.dataset.time = String(l.time);
