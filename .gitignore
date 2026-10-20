@@ -13,6 +13,8 @@ coverage/
 .cache/
 .idea/
 .vscode/
+ui-a.png
+ui-b.png
 *.pem
 *.key
 *.crt
