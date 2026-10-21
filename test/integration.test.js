@@ -103,20 +103,71 @@ test.after(() => {
 });
 
 /**
- * 请求上游 API 并对 503 做退避重试。
- * 上游限流 50 次/5 分钟，且 503 是间歇性的，重试可让测试稳定。
+ * 请求上游 API，并对临时性错误做退避重试。
+ *
+ * 上游是第三方服务（Cloudflare 后面），对数据中心 IP 经常返回 403/400/503。
+ * 这些都不是我们代码的问题，所以：
+ *   - 重试能解决的（429/503/网络抖动）→ 重试
+ *   - 重试也解决不了的（403/400，通常是 IP 被拦）→ 标记为上游不可用
  */
-async function fetchUpstream(path, { retries = 4 } = {}) {
+async function fetchUpstream(path, { retries = 3 } = {}) {
   let lastStatus = 0;
+  let lastBody = '';
   for (let i = 0; i <= retries; i++) {
-    const res = await fetch(`https://music-api.gdstudio.xyz/api.php${path}`, {
-      headers: { Origin: BASE },
-    });
+    let res;
+    try {
+      res = await fetch(`https://music-api.gdstudio.xyz/api.php${path}`, {
+        headers: { Origin: BASE },
+      });
+    } catch (err) {
+      lastStatus = 0;
+      lastBody = err?.message || 'network error';
+      await new Promise((r) => setTimeout(r, 1200 * (i + 1)));
+      continue;
+    }
     lastStatus = res.status;
-    if (res.status !== 503) return res;
-    await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+    if (res.status === 200) return res;
+    lastBody = (await res.text().catch(() => '')).slice(0, 120);
+    // 403/400 是 IP 级拦截，重试无意义
+    if (res.status === 403 || res.status === 400) break;
+    await new Promise((r) => setTimeout(r, 1200 * (i + 1)));
   }
-  return new Response('', { status: lastStatus });
+  return new Response(lastBody, { status: lastStatus || 502 });
+}
+
+/**
+ * 探测上游是否可用。
+ *
+ * 上游对不同来源 IP 的可达性差别很大：
+ * 本地开发机通常能通，GitHub Actions 的 runner IP 经常被 Cloudflare 拦。
+ * 与其让 CI 因为第三方服务挂掉而变红，不如跳过相关用例并明确说明。
+ */
+let upstreamAvailable = null;
+let upstreamReason = '';
+
+async function isUpstreamAvailable() {
+  if (upstreamAvailable !== null) return upstreamAvailable;
+  try {
+    const res = await fetch(
+      'https://music-api.gdstudio.xyz/api.php?types=search&source=netease&name=test&count=1&pages=1',
+      { headers: { Origin: BASE } }
+    );
+    upstreamAvailable = res.status === 200;
+    upstreamReason = upstreamAvailable
+      ? ''
+      : `上游返回 HTTP ${res.status}（通常是 Cloudflare 按来源 IP 拦截）`;
+  } catch (err) {
+    upstreamAvailable = false;
+    upstreamReason = `无法连接上游：${err?.message || err}`;
+  }
+  return upstreamAvailable;
+}
+
+/** 上游不可用时跳过当前用例 */
+async function skipIfUpstreamDown(t) {
+  if (await isUpstreamAvailable()) return false;
+  t.skip(`上游 GD 音乐台 API 当前不可用（${upstreamReason}），跳过此用例`);
+  return true;
 }
 
 test('HTTP 静态页与健康检查可用', async () => {
@@ -145,9 +196,10 @@ test('服务端不再代理音乐 API', async () => {
   }
 });
 
-test('上游 API 支持浏览器跨域直连', async () => {
+test('上游 API 支持浏览器跨域直连', async (t) => {
+  if (await skipIfUpstreamDown(t)) return;
   const res = await fetchUpstream('?types=search&source=netease&name=%E5%91%A8%E6%9D%B0%E4%BC%A6&count=3&pages=1');
-  assert.equal(res.status, 200);
+  assert.equal(res.status, 200, `上游应正常响应，实际 ${res.status}`);
   assert.equal(res.headers.get('access-control-allow-origin'), '*', '上游必须允许跨域');
   const list = await res.json();
   assert.ok(Array.isArray(list) && list.length > 0);
@@ -268,11 +320,12 @@ test('切换房间：离开旧房间并加入新房间', async () => {
   b.close();
 });
 
-test('每个客户端可独立从上游获取播放地址', async () => {
+test('每个客户端可独立从上游获取播放地址', async (t) => {
+  if (await skipIfUpstreamDown(t)) return;
   // 模拟两个客户端各自直连上游取地址
   const fetchUrl = async (br) => {
     const res = await fetchUpstream(`?types=url&source=netease&id=5257138&br=${br}`);
-    assert.equal(res.status, 200, '上游应正常响应');
+    assert.equal(res.status, 200, `上游应正常响应，实际 ${res.status}`);
     return res.json();
   };
   const a = await fetchUrl(320);
@@ -284,9 +337,10 @@ test('每个客户端可独立从上游获取播放地址', async () => {
   assert.equal(b.br, 128);
 });
 
-test('上游歌词接口返回原文与翻译', async () => {
+test('上游歌词接口返回原文与翻译', async (t) => {
+  if (await skipIfUpstreamDown(t)) return;
   const res = await fetchUpstream('?types=lyric&source=netease&id=451703096');
-  assert.equal(res.status, 200);
+  assert.equal(res.status, 200, `上游应正常响应，实际 ${res.status}`);
   const data = await res.json();
   assert.ok(data.lyric.includes('['), '应返回 LRC 原文');
   assert.ok(typeof data.tlyric === 'string');

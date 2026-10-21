@@ -219,3 +219,42 @@ test('CI 使用的 pnpm 版本与 package.json 一致', () => {
     'CI 安装的 pnpm 版本应与 package.json 的 packageManager 一致'
   );
 });
+
+test('CI 的单元测试步骤覆盖所有工作流相关测试', () => {
+  const wf = readWf('ci.yml');
+  const job = Object.values(wf.jobs)[0];
+  const unitStep = job.steps.find((s) => s.name === '单元测试');
+  assert.ok(unitStep, '应有单元测试步骤');
+  const script = unitStep.run;
+  for (const f of ['test/workflow.test.js', 'test/metadata-action.test.js']) {
+    assert.ok(script.includes(f), `CI 的单元测试应运行 ${f}`);
+  }
+});
+
+test('依赖上游的测试用例会跳过而非失败', () => {
+  // 上游在 Cloudflare 后面，对 GitHub runner 这类数据中心 IP 经常返回 403。
+  // 那些用例必须能跳过，保证 CI 退出码为 0。
+  const src = fs.readFileSync(path.join(ROOT, 'test', 'integration.test.js'), 'utf8');
+
+  // 必须有探测上游可用性的辅助函数
+  assert.match(src, /isUpstreamAvailable/, '应探测上游可用性');
+  assert.match(src, /skipIfUpstreamDown/, '应有跳过辅助函数');
+  assert.match(src, /t\.skip\(/, '应使用 t.skip() 跳过');
+
+  // 三项依赖上游的用例都要先检查
+  const upstreamTests = [
+    '上游 API 支持浏览器跨域直连',
+    '每个客户端可独立从上游获取播放地址',
+    '上游歌词接口返回原文与翻译',
+  ];
+  for (const name of upstreamTests) {
+    const idx = src.indexOf(`'${name}'`);
+    assert.ok(idx > 0, `应存在用例 ${name}`);
+    // 该用例之后 200 字内应调用 skipIfUpstreamDown
+    const nearby = src.slice(idx, idx + 200);
+    assert.ok(
+      nearby.includes('skipIfUpstreamDown'),
+      `用例「${name}」应在开头调用 skipIfUpstreamDown`
+    );
+  }
+});

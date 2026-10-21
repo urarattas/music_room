@@ -323,6 +323,27 @@ docker pull ghcr.io/urarattas/music_room:latest
 包括**真正执行一次 `docker build`** 来验证 Dockerfile 可用。
 两个工作流相互独立：CI 失败不会阻止镜像构建。
 
+### 关于第三方上游与 CI 稳定性
+
+GD 音乐台 API 在 Cloudflare 后面，**对数据中心 IP（如 GitHub Actions runner）
+经常返回 403/400** —— 这是上游的 IP 策略，不是我们代码的问题。
+
+因此 `test/integration.test.js` 里依赖上游的 3 个用例会**先探测上游可用性**，
+不可用时自动跳过（显示为 `skipped` 而非 `failed`），退出码仍为 0：
+
+```
+﹣ 上游 API 支持浏览器跨域直连  # 上游 GD 音乐台 API 当前不可用（…），跳过此用例
+ℹ pass 9
+ℹ fail 0
+ℹ skipped 3
+```
+
+这样 CI 只会在**我们的代码真的有问题**时变红，不会因为第三方服务波动而误报。
+
+> 如果希望这些用例必须执行（比如做发布前的完整验证），
+> 可以在本地跑：`node --test test/integration.test.js`。
+> 也可以在自己的服务器（IP 未被拦截）上跑，那里它们会正常通过。
+
 ### 关于 pnpm 的安装顺序（踩过的坑）
 
 CI 里安装 pnpm 有个**顺序要求**，搞反了会报：

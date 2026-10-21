@@ -235,7 +235,7 @@ music_room/
 ## 测试
 
 ```bash
-# 服务端集成测试（12 项）
+# 服务端集成测试（12 项，其中 3 项依赖上游，上游不可用时自动跳过）
 node --test test/integration.test.js
 
 # WebSocket 协议测试（6 项）
@@ -349,8 +349,12 @@ CHROME_PATH="C:\Program Files\Google\Chrome\Application\chrome.exe" node test/ui
 - **上游可用性**：GD 音乐台 API 属于第三方服务，可能限流或临时不可用。
   由于每个客户端独立请求，某个客户端失败不会影响房间内其他人。
 
-  实测中遇到过 Cloudflare 直接对整个 IP 返回 400（连 `/docs` 都 400）的情况，
-  通常是短时间内请求过于密集触发的临时封禁，一段时间后会自动恢复。
+  实测中遇到过 Cloudflare 直接对整个 IP 返回 400/403 的情况
+  （连 `/docs` 都 400），包括：
+  - 短时间内请求过于密集触发的临时封禁，一段时间后会自动恢复
+  - **数据中心 IP 被长期拦截** —— GitHub Actions runner 就属于这一类，
+    这也是 CI 里相关用例会跳过而不是失败的原因
+
   此时应用的降级表现（已由 `test/resilience.test.js` 覆盖）：
   - 顶部提示「音乐服务暂时不可用（可能是访问过于频繁被限制），请稍后重试」
   - 搜索结果列表清空，不残留脏数据
