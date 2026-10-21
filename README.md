@@ -80,11 +80,13 @@
 ### Linux / macOS
 
 ```bash
-chmod +x start.sh   # 首次执行需要给权限
+chmod +x start.sh   # 首次执行需要给权限（只需一次）
 ./start.sh
 ```
 
 脚本会自动检查 Node.js 是否安装、版本是否够（需要 18+），然后启动服务。
+
+> 如果 `chmod` 提示权限不足，可以改用 `bash start.sh` 直接运行，无需给权限。
 
 ### 手动启动（可选）
 
