@@ -417,4 +417,42 @@ server.listen(PORT, HOST, () => {
   console.log(`   上游地址: ${UPSTREAM}`);
 });
 
+/* ------------------------------ 优雅退出 ------------------------------ */
+
+/**
+ * 处理退出信号。
+ *
+ * 不处理的话，进程会被信号直接杀死（退出码 143 / null），
+ * `docker stop` 时表现为「非正常退出」。这里主动关闭连接与服务器，
+ * 让进程以退出码 0 结束。
+ */
+let shuttingDown = false;
+
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`\n收到 ${signal}，正在关闭...`);
+
+  // 关闭所有 WebSocket 连接
+  for (const conn of connections.values()) {
+    try {
+      conn.ws.close(1001, 'server shutting down');
+    } catch {
+      /* ignore */
+    }
+  }
+  connections.clear();
+
+  server.close(() => {
+    console.log('服务已停止。');
+    process.exit(0);
+  });
+
+  // 兜底：3 秒内没关完就强制退出
+  setTimeout(() => process.exit(0), 3000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
 export { server, registry };

@@ -19,6 +19,8 @@
     "test:docker:ignore": "node --test test/dockerignore.test.js",
     "test:docker:npm": "node --test test/docker-npm.test.js",
     "test:docker:runtime": "node test/docker-runtime.test.js",
+    "test:docker:e2e": "node test/docker-e2e.mjs",
+    "test:shutdown": "node --test --test-timeout=20000 test/shutdown.test.js",
     "test:docs": "node --test test/docs.test.js",
     "test:ui": "node test/ui.test.js",
     "test:sources": "node test/sources.test.js",

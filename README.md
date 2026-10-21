@@ -208,6 +208,8 @@ music_room/
 │   ├── dockerignore.test.js  # .dockerignore 匹配逻辑校验
 │   ├── docker-npm.test.js    # 依赖安装步骤校验
 │   ├── docker-runtime.test.js# 模拟容器运行验证
+│   ├── docker-e2e.mjs        # Docker 构建流程端到端模拟
+│   ├── shutdown.test.js      # 优雅退出测试
 │   ├── ui.test.js            # 浏览器端到端测试（puppeteer-core）
 │   ├── sources.test.js       # 各音源可用性检查
 │   └── screenshot.mjs        # 生成文档截图
@@ -240,6 +242,12 @@ node --test test/docker.test.js
 
 # 模拟容器运行验证（6 项）
 node test/docker-runtime.test.js
+
+# Docker 构建流程端到端模拟（9 项）
+node test/docker-e2e.mjs
+
+# 优雅退出测试（3 项）
+node --test test/shutdown.test.js
 
 # 各音源可用性检查（netease / joox / bilibili）
 node test/sources.test.js

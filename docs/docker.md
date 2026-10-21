@@ -78,8 +78,21 @@ deps 阶段                        runtime 阶段
 
 ### 信号处理
 
-用 `tini` 作为 PID 1，转发 `SIGTERM` / `SIGINT` 给 Node 进程，
-因此 `docker stop` 会让服务**优雅退出**而不是被强杀（`SIGKILL`）。
+用 `tini` 作为 PID 1，转发 `SIGTERM` / `SIGINT` 给 Node 进程。
+服务端注册了这两个信号的处理器，收到后会：
+
+1. 关闭所有 WebSocket 连接（关闭码 1001）
+2. 关闭 HTTP 服务器
+3. 以**退出码 0** 结束
+
+因此 `docker stop` 表现为正常停止，而不是被强杀（`SIGKILL`，退出码 137）。
+`docker compose down` 同理。
+
+```bash
+# 验证退出码
+docker stop music-room && docker inspect --format '{{.State.ExitCode}}' music-room
+# 期望输出 0
+```
 
 ### 健康检查
 
