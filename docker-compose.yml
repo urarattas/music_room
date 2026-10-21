@@ -1,0 +1,47 @@
+# ============================================================
+#  音乐听歌房 · Music Room
+#
+#  启动：docker compose up -d
+#  查看：docker compose logs -f
+#  停止：docker compose down
+# ============================================================
+
+services:
+  music-room:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: music-room:latest
+    container_name: music-room
+
+    # 端口映射：左边是宿主机端口，右边是容器内端口
+    # 改成 "8080:3000" 即可用 8080 端口访问
+    ports:
+      - "${PORT:-3000}:3000"
+
+    environment:
+      # 容器内监听地址必须是 0.0.0.0，否则外部访问不到
+      PORT: "3000"
+      HOST: "0.0.0.0"
+      TZ: "${TZ:-Asia/Shanghai}"
+
+    # 容器崩溃时自动重启
+    restart: unless-stopped
+
+    # 健康检查（与 Dockerfile 中的保持一致，compose 可单独覆盖）
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+
+    # 资源限制（可选，Docker Compose v2 支持）
+    deploy:
+      resources:
+        limits:
+          memory: 512M

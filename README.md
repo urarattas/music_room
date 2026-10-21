@@ -73,11 +73,33 @@
 
 > **本项目零运行时依赖** —— 只需装好 Node.js，不用 pnpm / npm，也不用联网装包。
 
-### Windows
+### 方式一：Docker（推荐用于服务器部署）
 
-双击 **`start.bat`** 即可（或在命令行里运行 `start.bat`）。
+```bash
+# 启动
+docker compose up -d
 
-### Linux / macOS
+# 查看日志
+docker compose logs -f
+
+# 停止
+docker compose down
+```
+
+或者不用 compose：
+
+```bash
+docker build -t music-room .
+docker run -d --name music-room -p 3000:3000 --restart unless-stopped music-room
+```
+
+容器内自带 Node.js，**宿主机不需要装任何东西**。详见 [`docs/docker.md`](docs/docker.md)。
+
+### 方式二：一键脚本（推荐用于本机）
+
+**Windows**：双击 **`start.bat`**
+
+**Linux / macOS**：
 
 ```bash
 chmod +x start.sh   # 首次执行需要给权限（只需一次）
@@ -88,17 +110,17 @@ chmod +x start.sh   # 首次执行需要给权限（只需一次）
 
 > 如果 `chmod` 提示权限不足，可以改用 `bash start.sh` 直接运行，无需给权限。
 
-### 手动启动（可选）
+### 方式三：手动启动
 
 ```bash
 node server/index.js
 ```
 
-启动后打开浏览器访问 **http://localhost:3000** 即可。
+三种方式启动后都访问 **http://localhost:3000**。
 
 ### 换端口
 
-改脚本顶部的 `PORT=3000` 即可，或用环境变量：
+改 `start.bat` / `start.sh` 顶部的 `PORT=3000`，或用环境变量：
 
 ```bash
 # Windows
@@ -106,6 +128,9 @@ set PORT=8080 && node server\index.js
 
 # Linux / macOS
 PORT=8080 node server/index.js
+
+# Docker
+PORT=8080 docker compose up -d
 ```
 
 ### 局域网 / 公网访问
@@ -154,6 +179,9 @@ npm test           # 跑全部测试
 music_room/
 ├── start.bat           # Windows 一键启动（双击即可）
 ├── start.sh            # Linux / macOS 一键启动
+├── Dockerfile          # 多阶段构建镜像
+├── docker-compose.yml  # compose 编排
+├── .dockerignore       # 构建上下文排除项
 ├── server/
 │   ├── index.js        # HTTP 服务 + WebSocket 入口（只广播，不代理音乐）
 │   ├── rooms.js        # 房间、成员、播放列表、播放状态
@@ -176,12 +204,17 @@ music_room/
 │   ├── websocket.test.js     # 自研 WebSocket 实现协议测试
 │   ├── lyrics.test.js        # 歌词解析与翻译对齐单元测试
 │   ├── resilience.test.js    # 降级行为测试（上游不可用时）
+│   ├── docker.test.js        # Docker 配置静态校验
+│   ├── dockerignore.test.js  # .dockerignore 匹配逻辑校验
+│   ├── docker-npm.test.js    # 依赖安装步骤校验
+│   ├── docker-runtime.test.js# 模拟容器运行验证
 │   ├── ui.test.js            # 浏览器端到端测试（puppeteer-core）
 │   ├── sources.test.js       # 各音源可用性检查
 │   └── screenshot.mjs        # 生成文档截图
 └── docs/
     ├── protocol.md     # 通信协议
-    └── contracts.md    # 前端模块契约
+    ├── contracts.md    # 前端模块契约
+    └── docker.md       # Docker 部署详解
 ```
 
 ## 测试
@@ -201,6 +234,12 @@ node test/ui.test.js
 
 # 降级行为测试（7 项，上游不可用时的表现）
 node test/resilience.test.js
+
+# Docker 配置校验（11 项）
+node --test test/docker.test.js
+
+# 模拟容器运行验证（6 项）
+node test/docker-runtime.test.js
 
 # 各音源可用性检查（netease / joox / bilibili）
 node test/sources.test.js

@@ -15,6 +15,11 @@
     "test:ws": "node --test --test-timeout=15000 test/websocket.test.js",
     "test:lyrics": "node --test test/lyrics.test.js",
     "test:resilience": "node test/resilience.test.js",
+    "test:docker": "node --test test/docker.test.js",
+    "test:docker:ignore": "node --test test/dockerignore.test.js",
+    "test:docker:npm": "node --test test/docker-npm.test.js",
+    "test:docker:runtime": "node test/docker-runtime.test.js",
+    "test:docs": "node --test test/docs.test.js",
     "test:ui": "node test/ui.test.js",
     "test:sources": "node test/sources.test.js",
     "screenshot": "node test/screenshot.mjs"
@@ -22,7 +27,8 @@
   "dependencies": {},
   "devDependencies": {
     "puppeteer-core": "^25.14.0",
-    "ws": "^8.22.0"
+    "ws": "^8.22.0",
+    "yaml": "^2.9.1"
   },
   "keywords": [
     "webrtc",
