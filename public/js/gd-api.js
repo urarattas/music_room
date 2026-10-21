@@ -56,6 +56,32 @@ const inflight = new Map();
 
 /* ------------------------------ 底层请求 ------------------------------ */
 
+/**
+ * 把 HTTP 状态码翻译成人话。
+ * 上游被 Cloudflare 拦下时会返回 400/403，用户看到"音乐服务暂时不可用"
+ * 比看到原始状态码有用得多。
+ */
+function describeStatus(status) {
+  if (status === 400 || status === 403) {
+    return '音乐服务暂时不可用（可能是访问过于频繁被限制），请稍后重试';
+  }
+  if (status === 404) return '音乐服务接口不存在';
+  if (status === 429) return '音乐服务请求过于频繁，请稍后再试';
+  if (status === 503) return '音乐服务繁忙，请稍后重试';
+  if (status >= 500) return `音乐服务异常（${status}）`;
+  return `音乐服务返回 ${status}`;
+}
+
+/** 把底层异常翻译成人话 */
+function describeError(err) {
+  if (!err) return '未知错误';
+  if (err.code === 'NETWORK' || err.name === 'TypeError') {
+    return '无法连接音乐服务，请检查网络连接';
+  }
+  if (err.name === 'AbortError') return '音乐服务响应超时，请稍后重试';
+  return err.message || '未知错误';
+}
+
 async function callApi(params, { ttlMs = 0, timeoutMs = 15000, retries = 2 } = {}) {
   const url = new URL(UPSTREAM);
   for (const [k, v] of Object.entries(params)) {
@@ -80,8 +106,11 @@ async function callApi(params, { ttlMs = 0, timeoutMs = 15000, retries = 2 } = {
           headers: { accept: 'application/json' },
         });
         if (!res.ok) {
-          const err = new Error(`音乐服务返回 ${res.status}`);
-          err.code = res.status === 503 ? 'UPSTREAM_BUSY' : 'UPSTREAM_ERROR';
+          const err = new Error(describeStatus(res.status));
+          err.code =
+            res.status === 503 || res.status === 429
+              ? 'UPSTREAM_BUSY'
+              : 'UPSTREAM_ERROR';
           err.status = res.status;
           throw err;
         }
@@ -97,8 +126,12 @@ async function callApi(params, { ttlMs = 0, timeoutMs = 15000, retries = 2 } = {
         return ttlMs > 0 ? cacheSet(key, data, ttlMs) : data;
       } catch (err) {
         lastErr = err;
-        // 503 / 网络抖动时退避重试
-        if (err.code === 'UPSTREAM_BUSY' && attempt < retries) {
+        // 网络错误 / 503 / 限流时退避重试
+        const retryable =
+          err.code === 'UPSTREAM_BUSY' ||
+          err.code === 'NETWORK' ||
+          err.name === 'AbortError';
+        if (retryable && attempt < retries) {
           await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
           continue;
         }
@@ -111,7 +144,13 @@ async function callApi(params, { ttlMs = 0, timeoutMs = 15000, retries = 2 } = {
   })().finally(() => inflight.delete(key));
 
   inflight.set(key, task);
-  return task;
+  return task.catch((err) => {
+    // 统一包装成可读的错误信息
+    const wrapped = new Error(describeError(err));
+    wrapped.code = err.code || 'UPSTREAM_ERROR';
+    wrapped.status = err.status;
+    throw wrapped;
+  });
 }
 
 /* ------------------------------ 对外接口 ------------------------------ */

@@ -14,6 +14,7 @@
     "test": "node --test --test-timeout=30000 test/",
     "test:ws": "node --test --test-timeout=15000 test/websocket.test.js",
     "test:lyrics": "node --test test/lyrics.test.js",
+    "test:resilience": "node test/resilience.test.js",
     "test:ui": "node test/ui.test.js",
     "test:sources": "node test/sources.test.js",
     "screenshot": "node test/screenshot.mjs"

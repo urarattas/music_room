@@ -173,6 +173,7 @@ music_room/
 │   ├── integration.test.js   # 服务端 + WebSocket 集成测试
 │   ├── websocket.test.js     # 自研 WebSocket 实现协议测试
 │   ├── lyrics.test.js        # 歌词解析与翻译对齐单元测试
+│   ├── resilience.test.js    # 降级行为测试（上游不可用时）
 │   ├── ui.test.js            # 浏览器端到端测试（puppeteer-core）
 │   ├── sources.test.js       # 各音源可用性检查
 │   └── screenshot.mjs        # 生成文档截图
@@ -195,6 +196,9 @@ node --test test/lyrics.test.js
 
 # 浏览器端到端测试（31 项，需要本机 Chrome）
 node test/ui.test.js
+
+# 降级行为测试（7 项，上游不可用时的表现）
+node test/resilience.test.js
 
 # 各音源可用性检查（netease / joox / bilibili）
 node test/sources.test.js
@@ -282,6 +286,17 @@ CHROME_PATH="C:\Program Files\Google\Chrome\Application\chrome.exe" node test/ui
   服务端代理时代这个问题只算在服务器头上，现在分摊到了每个客户端。
 - **上游可用性**：GD 音乐台 API 属于第三方服务，可能限流或临时不可用。
   由于每个客户端独立请求，某个客户端失败不会影响房间内其他人。
+
+  实测中遇到过 Cloudflare 直接对整个 IP 返回 400（连 `/docs` 都 400）的情况，
+  通常是短时间内请求过于密集触发的临时封禁，一段时间后会自动恢复。
+  此时应用的降级表现（已由 `test/resilience.test.js` 覆盖）：
+  - 顶部提示「音乐服务暂时不可用（可能是访问过于频繁被限制），请稍后重试」
+  - 搜索结果列表清空，不残留脏数据
+  - 房间成员、聊天、播放进度同步**照常工作**（这些不依赖上游）
+  - 上游恢复后重新搜索即可
+
+  如果你的网络出口 IP 被上游限流，可以把 `public/js/gd-api.js` 里的
+  `UPSTREAM` 换成镜像地址，或改回服务端代理模式（见 `docs/protocol.md`）。
 
 ## 致谢与声明
 
