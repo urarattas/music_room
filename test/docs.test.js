@@ -11,7 +11,13 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 
-const mdFiles = ['README.md', 'docs/protocol.md', 'docs/contracts.md', 'docs/docker.md'];
+const mdFiles = [
+  'README.md',
+  'docs/protocol.md',
+  'docs/contracts.md',
+  'docs/docker.md',
+  'docs/logging.md',
+];
 
 for (const rel of mdFiles) {
   test(`${rel} 代码块成对闭合`, () => {

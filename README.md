@@ -24,6 +24,7 @@
 | 🖼️ 封面 | 直连上游取地址，渐进加载只拉取可视区域内的封面 |
 | 👥 成员列表 | 头像、昵称、开麦状态指示 |
 | 🔗 房间邀请 | 房间名 + 分享链接（`?room=<房间名>`） |
+| 📝 服务端日志 | 连接/断开/入房/切房/错误全量记录；按天分文件，超限自动轮转，过期自动清理 |
 | 🐳 Docker | 一键构建运行镜像；GitHub Actions 自动构建并推送到 GHCR |
 
 ## 技术栈
@@ -197,6 +198,7 @@ music_room/
 ├── server/
 │   ├── index.js        # HTTP 服务 + WebSocket 入口（只广播，不代理音乐）
 │   ├── rooms.js        # 房间、成员、播放列表、播放状态
+│   ├── logger.js       # 日志：分级、按天分文件、轮转、过期清理
 │   └── ws.js           # 自研 WebSocket 服务端实现（零依赖）
 ├── public/
 │   ├── index.html
@@ -229,7 +231,8 @@ music_room/
 └── docs/
     ├── protocol.md     # 通信协议
     ├── contracts.md    # 前端模块契约
-    └── docker.md       # Docker 部署详解
+    ├── docker.md       # Docker 部署详解
+    └── logging.md      # 服务端日志说明
 ```
 
 ## 测试
@@ -316,6 +319,33 @@ CHROME_PATH="C:\Program Files\Google\Chrome\Application\chrome.exe" node test/ui
 > 上游仍有 **50 次 / 5 分钟** 的配额限制，但现在是**每个客户端各算各的**，
 > 服务端不再消耗任何配额。单个浏览器频繁搜索仍可能触发上游 503，
 > 此时界面会提示"搜索失败"，稍后重试即可。
+
+## 服务端日志
+
+服务会把运行日志写到 `logs/` 目录，**按天分文件**，超限自动轮转，过期自动删除：
+
+```
+[2026-10-21 12:55:24.375] [INFO ] WebSocket 连接建立 {"connId":"c1","ip":"127.0.0.1","total":1}
+[2026-10-21 12:55:24.378] [INFO ] 成员加入房间 {"connId":"c1","name":"小明","room":"大厅","members":1}
+[2026-10-21 12:55:56.484] [INFO ] WebSocket 连接断开 {"connId":"c1","name":"小明","room":"大厅","remaining":0}
+```
+
+记录用户连接/断开、入房/切房、播放曲目，以及所有警告与错误（含未捕获异常）。
+配置项全部走环境变量：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
+| `LOG_DIR` | `<项目根>/logs` | 日志目录 |
+| `LOG_MAX_SIZE` | `10485760` | 单文件上限（10MB），超过轮转 |
+| `LOG_MAX_FILES` | `5` | 每个日期保留的轮转份数 |
+| `LOG_MAX_DAYS` | `7` | 保留天数，超期自动删除 |
+
+```bash
+LOG_LEVEL=debug node server/index.js   # 打开详细日志
+```
+
+详见 [`docs/logging.md`](docs/logging.md)。
 
 ## 已知限制
 

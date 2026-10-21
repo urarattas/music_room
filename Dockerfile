@@ -48,6 +48,10 @@ COPY server ./server
 COPY public ./public
 COPY package.json ./
 
+# 日志目录：交给 node 用户写入。
+# 容器里建议挂载卷持久化：docker run -v $(pwd)/logs:/app/logs
+RUN mkdir -p /app/logs && chown -R node:node /app/logs
+
 # OCI 元数据：让镜像在 GHCR / Docker Hub 上显示来源与说明，
 # 并把容器包与本仓库关联起来（GITHUB_TOKEN 推送时需要这个标签）
 LABEL org.opencontainers.image.title="音乐听歌房 Music Room" \
@@ -55,6 +59,13 @@ LABEL org.opencontainers.image.title="音乐听歌房 Music Room" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.source="https://github.com/urarattas/music_room" \
       org.opencontainers.image.vendor="urarattas"
+
+# 日志配置（可用环境变量覆盖）
+ENV LOG_DIR=/app/logs \
+    LOG_LEVEL=info \
+    LOG_MAX_SIZE=10485760 \
+    LOG_MAX_FILES=5 \
+    LOG_MAX_DAYS=7
 
 # 以非 root 用户运行
 USER node

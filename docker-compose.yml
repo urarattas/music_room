@@ -24,6 +24,15 @@ services:
       PORT: "3000"
       HOST: "0.0.0.0"
       TZ: "${TZ:-Asia/Shanghai}"
+      # 日志配置
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      LOG_MAX_SIZE: "${LOG_MAX_SIZE:-10485760}"
+      LOG_MAX_FILES: "${LOG_MAX_FILES:-5}"
+      LOG_MAX_DAYS: "${LOG_MAX_DAYS:-7}"
+
+    # 日志持久化：容器重建后日志不丢
+    volumes:
+      - ./logs:/app/logs
 
     # 容器崩溃时自动重启
     restart: unless-stopped

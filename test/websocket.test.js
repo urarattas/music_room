@@ -144,3 +144,47 @@ test('服务端响应 ping（保活）', async () => {
   assert.equal(ponged, true);
   wss.close();
 });
+
+test('客户端主动关闭时，服务端会触发 close 事件', async () => {
+  // 这个行为很关键：服务端的 close 事件负责清理房间成员。
+  // 如果 close 事件不触发，离开房间的用户会一直残留在成员列表里。
+  const { server, wss } = startServer();
+  await new Promise((r) => server.listen(34592, '127.0.0.1', r));
+
+  const serverClosed = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('服务端未收到 close 事件')), 6000);
+    wss.on('connection', (conn) => {
+      conn.on('close', (code) => {
+        clearTimeout(timer);
+        resolve(code);
+      });
+    });
+    const ws = new WebSocket('ws://127.0.0.1:34592/ws');
+    ws.on('open', () => setTimeout(() => ws.close(), 200));
+    ws.on('error', reject);
+  });
+
+  assert.ok(typeof serverClosed === 'number', '服务端应收到带退出码的 close 事件');
+  wss.close();
+});
+
+test('服务端主动关闭连接时，也会触发 close 事件', async () => {
+  const { server, wss } = startServer();
+  await new Promise((r) => server.listen(34591, '127.0.0.1', r));
+
+  const serverClosed = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('服务端未收到 close 事件')), 6000);
+    wss.on('connection', (conn) => {
+      conn.on('close', (code) => {
+        clearTimeout(timer);
+        resolve(code);
+      });
+      setTimeout(() => conn.close(1001, 'bye'), 200);
+    });
+    const ws = new WebSocket('ws://127.0.0.1:34591/ws');
+    ws.on('error', () => {});
+  });
+
+  assert.equal(serverClosed, 1001);
+  wss.close();
+});

@@ -1,7 +1,10 @@
 /**
  * 音乐听歌房服务端
- * - HTTP：静态资源 + /api 音乐代理
+ * - HTTP：静态资源 + 房间相关接口
  * - WebSocket：房间信令、聊天、播放状态同步
+ *
+ * 日志：写入 logs/ 目录，按天分文件，超限自动轮转，过期自动清理。
+ * 详见 server/logger.js。
  */
 import http from 'node:http';
 import fs from 'node:fs';
@@ -11,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 import { WebSocketServer } from './ws.js';
 import { RoomRegistry } from './rooms.js';
+import { logger, installGlobalHandlers } from './logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '..', 'public');
@@ -46,6 +50,23 @@ const MIME = {
 };
 
 /* ---------------------------------- HTTP ---------------------------------- */
+
+/**
+ * 取客户端 IP。
+ * 反向代理后 req.socket.remoteAddress 是代理的 IP，
+ * 优先取 X-Forwarded-For 的第一个地址。
+ */
+function getClientIp(req) {
+  if (!req) return 'unknown';
+  const xff = req.headers?.['x-forwarded-for'];
+  if (xff) {
+    const first = String(xff).split(',')[0].trim();
+    if (first) return first;
+  }
+  const real = req.headers?.['x-real-ip'];
+  if (real) return String(real).trim();
+  return req.socket?.remoteAddress || 'unknown';
+}
 
 function sendJson(res, status, data) {
   const body = JSON.stringify(data);
@@ -114,9 +135,11 @@ function handleApi(req, res, url) {
     return sendJson(res, 200, {
       ok: true,
       rooms: registry.rooms.size,
+      connections: connections.size,
       uptime: process.uptime(),
       // 告知客户端上游地址，便于前端直连
       upstream: UPSTREAM,
+      log: logger.stats(),
     });
   }
   if (p === '/api/rooms') {
@@ -129,7 +152,23 @@ function handleApi(req, res, url) {
 }
 
 const server = http.createServer(async (req, res) => {
+  const started = Date.now();
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const ip = getClientIp(req);
+
+  // 记录访问结果（静态资源量大，只在 debug 级别记录）
+  res.on('finish', () => {
+    const status = res.statusCode;
+    const level = status >= 500 ? 'error' : status >= 400 ? 'warn' : 'debug';
+    logger[level]('HTTP 请求', {
+      method: req.method,
+      path: url.pathname,
+      status,
+      ip,
+      ms: Date.now() - started,
+    });
+  });
+
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'access-control-allow-origin': '*',
@@ -150,6 +189,13 @@ const server = http.createServer(async (req, res) => {
     }
     await serveStatic(req, res, url.pathname);
   } catch (err) {
+    logger.error('HTTP 请求处理失败', {
+      method: req.method,
+      path: url.pathname,
+      ip,
+      error: err?.message,
+      stack: err?.stack,
+    });
     sendJson(res, 500, { error: err?.message || 'internal error' });
   }
 });
@@ -211,13 +257,17 @@ function playTrack(room, track, pos = 0) {
 
 wss.on('connection', (ws, req) => {
   const connId = `c${++connSeq}`;
-  connections.set(connId, { ws, user: null, room: null });
+  const ip = getClientIp(req);
+  connections.set(connId, { ws, user: null, room: null, ip });
+
+  logger.info('WebSocket 连接建立', { connId, ip, total: connections.size });
 
   ws.on('message', async (raw) => {
     let msg;
     try {
       msg = JSON.parse(raw.toString());
     } catch {
+      logger.warn('收到无法解析的消息', { connId, ip });
       return sendTo(ws, 'error', { msg: '消息格式错误' });
     }
     const conn = connections.get(connId);
@@ -235,6 +285,13 @@ wss.on('connection', (ws, req) => {
               break;
             }
             const old = conn.room;
+            logger.info('成员切换房间', {
+              connId,
+              ip,
+              name: conn.user.name,
+              from: old.id,
+              to: wantRoom,
+            });
             old.removeUser(conn.user.id);
             broadcast(old, 'chat', {
               from: { id: 'system', name: '系统' },
@@ -252,6 +309,13 @@ wss.on('connection', (ws, req) => {
           const user = room.addUser(ws, { name: msg.name });
           conn.user = user;
           conn.room = room;
+          logger.info('成员加入房间', {
+            connId,
+            ip,
+            name: user.name,
+            room: room.id,
+            members: room.userCount,
+          });
           sendTo(ws, 'welcome', {
             selfId: user.id,
             room: { id: room.id, name: room.name },
@@ -287,6 +351,13 @@ wss.on('connection', (ws, req) => {
             ts: Date.now(),
           };
           room.addChat(entry);
+          logger.debug('收到聊天消息', {
+            connId,
+            ip,
+            room: room.id,
+            name: user.name,
+            length: text.length,
+          });
           broadcast(room, 'chat', entry);
           break;
         }
@@ -295,8 +366,19 @@ wss.on('connection', (ws, req) => {
           const { room } = conn;
           if (!room) return sendTo(ws, 'error', { msg: '尚未加入房间' });
           const track = sanitizeTrack(msg.track);
-          if (!track) return sendTo(ws, 'error', { msg: '无效的曲目' });
+          if (!track) {
+            logger.warn('收到无效的曲目', { connId, ip, room: room.id });
+            return sendTo(ws, 'error', { msg: '无效的曲目' });
+          }
           room.addToPlaylist(track);
+          logger.info('播放曲目', {
+            connId,
+            ip,
+            name: conn.user?.name,
+            room: room.id,
+            track: track.name,
+            source: track.source,
+          });
           playTrack(room, track, msg.pos);
           broadcastPlaylist(room);
           break;
@@ -380,7 +462,13 @@ wss.on('connection', (ws, req) => {
           break;
       }
     } catch (err) {
-      console.warn('[ws] 处理消息出错:', err?.message);
+      logger.error('处理 WebSocket 消息时出错', {
+        connId,
+        ip,
+        type: msg?.t,
+        error: err?.message,
+        stack: err?.stack,
+      });
       sendTo(ws, 'error', { msg: err?.message || '服务器错误' });
     }
   });
@@ -388,7 +476,17 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => {
     const conn = connections.get(connId);
     connections.delete(connId);
-    if (!conn || !conn.room || !conn.user) return;
+    if (!conn) return;
+
+    logger.info('WebSocket 连接断开', {
+      connId,
+      ip: conn.ip,
+      name: conn.user?.name,
+      room: conn.room?.id,
+      remaining: connections.size,
+    });
+
+    if (!conn.room || !conn.user) return;
     const room = conn.room;
     room.removeUser(conn.user.id);
     broadcast(room, 'chat', {
@@ -398,10 +496,19 @@ wss.on('connection', (ws, req) => {
       system: true,
     });
     broadcastUsers(room);
-    if (room.isEmpty()) registry.cleanup();
+    if (room.isEmpty()) {
+      registry.cleanup();
+      logger.info('房间已清空并回收', { room: room.id });
+    }
   });
 
-  ws.on('error', () => {
+  ws.on('error', (err) => {
+    logger.warn('WebSocket 连接错误', {
+      connId,
+      ip,
+      name: connections.get(connId)?.user?.name,
+      error: err?.message,
+    });
     try {
       ws.close();
     } catch {
@@ -411,10 +518,18 @@ wss.on('connection', (ws, req) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`🎵 音乐听歌房已启动: http://localhost:${PORT}`);
-  console.log(`   WebSocket: ws://localhost:${PORT}/ws`);
-  console.log(`   音乐来源: GD Studio 音乐台 API（浏览器直连，服务端不代理）`);
-  console.log(`   上游地址: ${UPSTREAM}`);
+  logger.info('服务已启动', {
+    port: PORT,
+    host: HOST,
+    node: process.version,
+    pid: process.pid,
+    logFile: logger.currentFile(),
+    upstream: UPSTREAM,
+  });
+  logger.info('音乐来源: GD Studio 音乐台 API（浏览器直连，服务端不代理）');
+  // 启动时清理一次过期日志
+  const removed = logger.cleanup();
+  if (removed > 0) logger.info('已清理过期日志文件', { removed });
 });
 
 /* ------------------------------ 优雅退出 ------------------------------ */
@@ -431,7 +546,11 @@ let shuttingDown = false;
 function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log(`\n收到 ${signal}，正在关闭...`);
+  logger.info(`收到 ${signal}，正在关闭...`, {
+    signal,
+    connections: connections.size,
+    rooms: registry.rooms.size,
+  });
 
   // 关闭所有 WebSocket 连接
   for (const conn of connections.values()) {
@@ -444,7 +563,7 @@ function shutdown(signal) {
   connections.clear();
 
   server.close(() => {
-    console.log('服务已停止。');
+    logger.info('服务已停止。');
     process.exit(0);
   });
 
@@ -455,4 +574,7 @@ function shutdown(signal) {
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
-export { server, registry };
+// 捕获未处理的异常 / Promise 拒绝，避免线索丢失
+installGlobalHandlers(logger);
+
+export { server, registry, logger };

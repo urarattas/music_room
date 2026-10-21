@@ -70,7 +70,10 @@ export class WebSocketConnection extends EventEmitter {
     payload.writeUInt16BE(code, 0);
     reasonBuf.copy(payload, 2);
     this._sendFrame(OP_CLOSE, payload);
-    this.readyState = 3; // CLOSING
+    // 注意：这里不要把 readyState 直接置为 3，
+    // 否则 _onClose 里的 `readyState === 3` 判断会提前 return，
+    // 导致 close 事件不触发（房间成员不会被清理）。
+    this.readyState = 2; // CLOSING
     // 给对方一点时间收到关闭帧
     setTimeout(() => {
       try {
@@ -178,7 +181,9 @@ export class WebSocketConnection extends EventEmitter {
         // 按 RFC 6455，收到关闭帧后必须回一个关闭帧。
         // 对方没带状态码（空载荷）时回 1000，让对端看到正常关闭。
         if (this.readyState === 1) {
-          this.readyState = 3; // CLOSING
+          // 置为 CLOSING(2) 而不是 CLOSED(3)：_onClose 遇到 3 会提前 return，
+          // 那样 close 事件就不会触发（房间成员不会被清理）。
+          this.readyState = 2; // CLOSING
           const echo = payload.length >= 2 ? payload : Buffer.from([0x03, 0xe8]); // 1000
           this._sendFrame(OP_CLOSE, echo);
         }
@@ -227,7 +232,8 @@ export class WebSocketConnection extends EventEmitter {
   }
 
   _onClose(code, reason) {
-    if (this.readyState === 3) return; // 已经关闭过
+    // 已经是 CLOSED 就不要重复触发
+    if (this.readyState === 3) return;
     this.readyState = 3; // CLOSED
     this.emit('close', code, reason);
   }

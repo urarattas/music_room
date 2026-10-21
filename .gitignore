@@ -12,6 +12,7 @@ dist/
 build/
 coverage/
 .cache/
+logs/
 .idea/
 .vscode/
 ui-a.png

@@ -107,3 +107,48 @@ test('.dockerignore 不会误排除运行所需文件', () => {
     );
   }
 });
+
+test('Dockerfile 为日志目录准备可写权限', () => {
+  // 服务端以 USER node 运行，/app 默认不可写，
+  // 日志目录必须提前创建并 chown，否则容器里无法写日志。
+  assert.match(dockerfile, /mkdir\s+-p\s+\/app\/logs/, '应创建日志目录');
+  assert.match(dockerfile, /chown\s+.*node.*\/app\/logs/, '日志目录应归 node 用户所有');
+
+  // USER node 必须在建目录之后，否则 chown 的权限不生效
+  assert.ok(
+    dockerfile.indexOf('chown') < dockerfile.indexOf('USER node'),
+    'chown 应在 USER node 之前'
+  );
+});
+
+test('Dockerfile 配置了日志相关环境变量', () => {
+  // ENV 可能写成多行（用反斜杠续行），这里把换行与续行符归一化再匹配。
+  // 续行里的变量没有 ENV 前缀，所以只校验变量名本身。
+  const flat = dockerfile.replace(/\\\s*\n\s*/g, ' ');
+  for (const v of [
+    'LOG_DIR=',
+    'LOG_LEVEL=',
+    'LOG_MAX_SIZE=',
+    'LOG_MAX_FILES=',
+    'LOG_MAX_DAYS=',
+  ]) {
+    assert.ok(flat.includes(v), `Dockerfile 应设置 ${v}`);
+  }
+  // 第一个日志变量必须由 ENV 引入
+  assert.match(flat, /ENV\s+LOG_DIR=/, 'LOG_DIR 应是 ENV 块的第一项');
+});
+
+test('docker-compose 挂载日志卷并透传日志配置', () => {
+  const doc = YAML.parse(compose);
+  const svc = doc.services['music-room'];
+
+  assert.ok(svc.volumes?.length, '应挂载日志卷');
+  assert.ok(
+    svc.volumes.some((v) => String(v).includes('/app/logs')),
+    '应把日志目录挂载到 /app/logs'
+  );
+
+  for (const key of ['LOG_LEVEL', 'LOG_MAX_SIZE', 'LOG_MAX_FILES', 'LOG_MAX_DAYS']) {
+    assert.ok(svc.environment?.[key], `compose 应透传 ${key}`);
+  }
+});
