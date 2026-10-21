@@ -8,8 +8,8 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { WebSocketServer } from 'ws';
 
+import { WebSocketServer } from './ws.js';
 import { RoomRegistry } from './rooms.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

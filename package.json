@@ -1,8 +1,8 @@
 {
   "name": "music-room",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "在线多人音乐听歌房：音乐由 GD Studio 音乐台 API 提供，用户之间 WebRTC P2P 语音 + 文字聊天",
+  "description": "在线多人音乐听歌房：浏览器直连 GD Studio 音乐台 API，用户之间 WebRTC P2P 语音 + 文字聊天",
   "type": "module",
   "main": "server/index.js",
   "engines": {
@@ -11,9 +11,16 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "test": "node --test test/"
+    "test": "node --test --test-timeout=30000 test/",
+    "test:ws": "node --test --test-timeout=15000 test/websocket.test.js",
+    "test:lyrics": "node --test test/lyrics.test.js",
+    "test:ui": "node test/ui.test.js",
+    "test:sources": "node test/sources.test.js",
+    "screenshot": "node test/screenshot.mjs"
   },
-  "dependencies": {
+  "dependencies": {},
+  "devDependencies": {
+    "puppeteer-core": "^25.14.0",
     "ws": "^8.22.0"
   },
   "keywords": [
@@ -22,8 +29,5 @@
     "chat",
     "websocket"
   ],
-  "license": "MIT",
-  "devDependencies": {
-    "puppeteer-core": "^25.14.0"
-  }
+  "license": "MIT"
 }

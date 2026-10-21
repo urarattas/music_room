@@ -27,7 +27,8 @@
 
 ## 技术栈
 
-- **服务端**：Node.js 18+（原生 `http`）+ `ws`（WebSocket）—— **只做房间与广播，不代理音乐**
+- **服务端**：Node.js 18+，**零运行时依赖**（原生 `http` + 自研 WebSocket 实现）
+  —— 只做房间与广播，不代理音乐
 - **前端**：原生 ES Module，无构建步骤、无框架
 - **音乐来源**：浏览器**直连** GD 音乐台 API（上游已开启 CORS）
 - **实时通信**：WebSocket（信令 / 聊天 / 状态同步）
@@ -70,35 +71,70 @@
 
 ## 快速开始
 
+> **本项目零运行时依赖** —— 只需装好 Node.js，不用 pnpm / npm，也不用联网装包。
+
+### Windows
+
+双击 **`start.bat`** 即可（或在命令行里运行 `start.bat`）。
+
+### Linux / macOS
+
 ```bash
-# 1. 安装依赖
-pnpm install      # 或 npm install
-
-# 2. 启动服务
-pnpm start        # 或 npm start
-
-# 3. 打开浏览器
-#    http://localhost:3000
+chmod +x start.sh   # 首次执行需要给权限
+./start.sh
 ```
 
-自定义端口：
+脚本会自动检查 Node.js 是否安装、版本是否够（需要 18+），然后启动服务。
+
+### 手动启动（可选）
 
 ```bash
-PORT=8080 pnpm start
+node server/index.js
+```
+
+启动后打开浏览器访问 **http://localhost:3000** 即可。
+
+### 换端口
+
+改脚本顶部的 `PORT=3000` 即可，或用环境变量：
+
+```bash
+# Windows
+set PORT=8080 && node server\index.js
+
+# Linux / macOS
+PORT=8080 node server/index.js
 ```
 
 ### 局域网 / 公网访问
 
-监听地址默认为 `0.0.0.0`，同一局域网内的其他设备可直接访问：
+监听地址默认为 `0.0.0.0`，同一局域网内的其他设备可直接访问
+（脚本启动后会打印局域网地址，例如 `http://192.168.1.63:3000`）：
 
 ```bash
-PORT=3000 HOST=0.0.0.0 pnpm start
+PORT=3000 HOST=0.0.0.0 node server/index.js
 # 朋友访问 http://<你的局域网IP>:3000/?room=房间名
 ```
 
 > ⚠️ **开麦必须使用 HTTPS 或 localhost**。
 > 浏览器只在安全上下文（`https://` 或 `localhost`）下开放 `getUserMedia`。
 > 部署到公网时请在前面加一层 Nginx / Caddy 反向代理并配置 TLS，否则开麦按钮会失败。
+
+### 关于 pnpm / npm
+
+**运行服务完全不需要它们。** `package.json` 里的依赖只是开发期用的测试工具：
+
+| 依赖 | 用途 | 运行时需要？ |
+| --- | --- | --- |
+| `ws` | 仅测试用（验证自研 WebSocket 实现） | ❌ |
+| `puppeteer-core` | 仅 UI 测试用 | ❌ |
+
+只有在跑测试时才需要安装：
+
+```bash
+npm install        # 或 pnpm install
+npm test           # 跑全部测试
+```
 
 ## 使用方式
 
@@ -114,9 +150,12 @@ PORT=3000 HOST=0.0.0.0 pnpm start
 
 ```
 music_room/
+├── start.bat           # Windows 一键启动（双击即可）
+├── start.sh            # Linux / macOS 一键启动
 ├── server/
 │   ├── index.js        # HTTP 服务 + WebSocket 入口（只广播，不代理音乐）
-│   └── rooms.js        # 房间、成员、播放列表、播放状态
+│   ├── rooms.js        # 房间、成员、播放列表、播放状态
+│   └── ws.js           # 自研 WebSocket 服务端实现（零依赖）
 ├── public/
 │   ├── index.html
 │   ├── styles.css
@@ -132,6 +171,7 @@ music_room/
 │       └── lyrics.js       # 歌词解析与滚动
 ├── test/
 │   ├── integration.test.js   # 服务端 + WebSocket 集成测试
+│   ├── websocket.test.js     # 自研 WebSocket 实现协议测试
 │   ├── lyrics.test.js        # 歌词解析与翻译对齐单元测试
 │   ├── ui.test.js            # 浏览器端到端测试（puppeteer-core）
 │   ├── sources.test.js       # 各音源可用性检查
@@ -146,6 +186,9 @@ music_room/
 ```bash
 # 服务端集成测试（12 项）
 node --test test/integration.test.js
+
+# WebSocket 协议测试（6 项）
+node --test test/websocket.test.js
 
 # 歌词解析单元测试（9 项）
 node --test test/lyrics.test.js
