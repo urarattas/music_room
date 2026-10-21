@@ -3,16 +3,21 @@ import { isVisible } from './cover-loader.js';
 import { gdApi } from './gd-api.js';
 
 export class SearchPanel {
-  constructor({ listEl, formEl, inputEl, sourceEl, statusEl, onPick, onAdd, coverLoader }) {
+  constructor({ listEl, formEl, inputEl, sourceEl, statusEl, moreBtn, onPick, onAdd, coverLoader }) {
     this.listEl = listEl;
     this.formEl = formEl;
     this.inputEl = inputEl;
     this.sourceEl = sourceEl;
     this.statusEl = statusEl;
+    this.moreBtn = moreBtn || null;
     this.onPick = onPick || (() => {});
     this.onAdd = onAdd || (() => {});
     this.coverLoader = coverLoader || null;
     this.results = [];
+    this.page = 1;
+    this.query = '';
+    this.source = sourceEl?.value || 'netease';
+    this.loading = false;
 
     this.formEl.addEventListener('submit', (e) => {
       e.preventDefault();
@@ -21,6 +26,9 @@ export class SearchPanel {
 
     // 滚动时补充加载可视区域内的封面
     this.listEl.addEventListener('scroll', () => this._loadVisibleCovers());
+
+    // 加载更多
+    this.moreBtn?.addEventListener('click', () => this.search(this.page + 1, { append: true }));
   }
 
   /** 只为可视区域内的条目加载封面，避免一次拉几十张 */
@@ -46,31 +54,71 @@ export class SearchPanel {
     }
   }
 
-  async search(pages = 1) {
+  /**
+   * 搜索
+   * @param {number} pages 页码
+   * @param {{append?:boolean}} opts append=true 时把结果追加到已有列表
+   */
+  async search(pages = 1, { append = false } = {}) {
     const name = this.inputEl.value.trim();
     if (!name) {
       this.statusEl.textContent = '请输入关键字';
       return;
     }
+    if (this.loading) return;
+
     const source = this.sourceEl.value;
-    this.statusEl.textContent = '搜索中…';
+    // 查询条件变了就不是"加载更多"，而是新搜索（会替换列表）
+    const sameQuery = name === this.query && source === this.source;
+    const isNewQuery = !append || !sameQuery;
+
+    this.loading = true;
+    this.statusEl.style.color = '';
+    this.statusEl.textContent = append ? '加载中…' : '搜索中…';
+    this.moreBtn && (this.moreBtn.disabled = true);
+
     try {
       // 浏览器直连 GD 音乐台 API
       const list = await gdApi.searchTracks({ source, name, count: 30, pages });
-      this.results = list || [];
-      this.statusEl.style.color = '';
+      if (isNewQuery) {
+        this.results = list || [];
+      } else {
+        // 去重后追加（上游可能返回重复项）
+        const seen = new Set(this.results.map((t) => `${t.source}:${t.id}`));
+        for (const t of list || []) {
+          const key = `${t.source}:${t.id}`;
+          if (!seen.has(key)) {
+            this.results.push(t);
+            seen.add(key);
+          }
+        }
+      }
+      this.page = pages;
+      this.query = name;
+      this.source = source;
+
       this.statusEl.textContent = this.results.length
         ? `找到 ${this.results.length} 首`
         : '没有找到相关歌曲';
       this.render();
+
+      // 未满页说明没有更多了
+      if (this.moreBtn) {
+        this.moreBtn.hidden = !(list && list.length >= 30);
+      }
 
       // 提醒：该音源可能搜得到但播不了（上游部分音源的 url 端点返回空）
       if (this.results.length) this._warnIfUnplayable(source);
     } catch (err) {
       this.statusEl.textContent = `搜索失败：${err.message}`;
       this.statusEl.style.color = 'var(--danger)';
-      this.results = [];
-      this.render();
+      if (!append) {
+        this.results = [];
+        this.render();
+      }
+    } finally {
+      this.loading = false;
+      if (this.moreBtn) this.moreBtn.disabled = false;
     }
   }
 

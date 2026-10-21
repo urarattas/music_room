@@ -94,12 +94,20 @@ player.duration;                       // 曲目总时长，**单位毫秒**（�
 const voice = new VoiceRoom({ client });
 voice.start();                         // 获取麦克风并与房间内其他成员建立 P2P 连接
 voice.setMicEnabled(true/false);       // 静音切换（不重新协商）
+voice.removePeer(userId);              // 清理某个成员的连接与音轨
 voice.stop();
 voice.on('localStream', (stream) => {});   // 本地麦克风流（用于音量条）
-voice.on('remoteStream', ({ id, stream }) => {});
-voice.on('peers', (peers) => {});          // [{id, name, connected}]
+voice.on('remoteStream', ({ id, stream, existing }) => {});
+voice.on('peerLeft', ({ id }) => {});      // 成员离开
+voice.on('peers', (peers) => {});          // [{id, connected, state}]
 voice.on('error', (err) => {});
 ```
+
+- **避免重复音轨**：同一 peer 可能多次触发 `ontrack`（重新协商）。
+  `remoteStream` 事件带 `existing` 标记，收到 `existing: true` 时应**替换已有
+  `<audio>` 的 srcObject 而不是新建元素**，否则会出现声音叠加。
+- **成员离开清理**：客户端收到 `users` 广播后，对比新旧成员列表，
+  对已离开的成员调用 `removePeer(id)`，并移除对应的 `<audio>` 元素。
 
 ## `chat.js` — `export class ChatPanel`
 
@@ -111,7 +119,7 @@ const chat = new ChatPanel({ client, listEl, formEl, inputEl });
 
 ```js
 const search = new SearchPanel({
-  listEl, inputEl, sourceEl, statusEl,
+  listEl, inputEl, sourceEl, statusEl, moreBtn,
   onPick: (track) => {},
   onAdd: (track) => {},
   coverLoader,
@@ -119,6 +127,9 @@ const search = new SearchPanel({
 ```
 
 - 通过 `gdApi.searchTracks({source, name, count, pages})` 搜索（浏览器直连上游）。
+- `search(pages, {append})`：`append=true` 时把结果**追加**到列表（翻页），
+  重复项按 `source:id` 去重；查询条件变化时自动切换为替换。
+- `moreBtn`（可选）：满页时显示「加载更多」按钮，点击请求下一页。
 - 展示歌名 / 歌手 / 专辑 / 封面，点击回调 `onPick(track)`，`+` 按钮回调 `onAdd(track)`。
 
 ## `cover-loader.js` — `export class CoverLoader`
@@ -142,9 +153,14 @@ const panel = new LyricPanel({ listEl, tabsEl });
 panel.setLyrics({ lyric, tlyric });   // LRC 原文与翻译
 panel.update(posMs);                  // 高亮当前行并居中滚动
 panel.clear();
-export function parseLrc(lrc);        // → [{time, text}]
+export function parseLrc(lrc);            // → [{time, text}]
+export function matchTranslation(lines, tLines);  // → Map<time, text>
 ```
 
+- **翻译对齐**：上游的原文与翻译时间戳不一定完全相同 —— 实测有的歌两者相差
+  50ms（如原文 `[00:01.000]` 对应翻译 `[00:01.050]`）。
+  `matchTranslation` 先精确匹配，剩余的用「时间最近且在 150ms 容差内」的原文行兜底，
+  否则这些行会被当成"没有翻译"，切到翻译标签页时仍显示原文。
 - 翻译模式按**原文行的时间轴**对齐，原文缺失对应翻译时用原文兜底，
   保证切换标签页时行数一致、高亮同步。
 

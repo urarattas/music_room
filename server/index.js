@@ -23,6 +23,9 @@ const HOST = process.env.HOST || '0.0.0.0';
  */
 const UPSTREAM = 'https://music-api.gdstudio.xyz/api.php';
 
+/** 新成员加入时补发的聊天记录条数 */
+const CHAT_HISTORY_ON_JOIN = 50;
+
 const registry = new RoomRegistry();
 
 /** connId -> { ws, user, room } */
@@ -257,6 +260,10 @@ wss.on('connection', (ws, req) => {
             music: room.musicState(),
             serverTime: Date.now(),
           });
+          // 把最近的聊天记录补发给新成员（否则中途加入的人看不到之前的对话）
+          for (const entry of room.chatHistory.slice(-CHAT_HISTORY_ON_JOIN)) {
+            sendTo(ws, 'chat', entry);
+          }
           broadcast(room, 'room', { room: { id: room.id, name: room.name } });
           broadcastUsers(room);
           // 通知新成员加入

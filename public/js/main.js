@@ -169,6 +169,7 @@ const search = new SearchPanel({
   inputEl: el.searchInput,
   sourceEl: el.searchSource,
   statusEl: el.searchStatus,
+  moreBtn: $('search-more'),
   onPick: (track) => playNow(track),
   onAdd: (track) => {
     client.send('playlist.add', { track });
@@ -358,8 +359,15 @@ client.on('welcome', (msg) => {
 });
 
 client.on('users', (msg) => {
+  const prev = client.knownUsers || [];
   client.knownUsers = msg.users || [];
-  renderMembers(msg.users || []);
+  renderMembers(client.knownUsers || []);
+
+  // 清理已离开成员的 P2P 连接与音轨
+  const alive = new Set(client.knownUsers.map((u) => u.id));
+  for (const u of prev) {
+    if (!alive.has(u.id)) voice.removePeer(u.id);
+  }
 });
 
 client.on('music', (msg) => player.applyServerState(msg.state));
@@ -480,12 +488,35 @@ voice.on('error', (e) => {
   }
 });
 
-voice.on('remoteStream', ({ id, stream }) => {
-  const audio = document.createElement('audio');
-  audio.autoplay = true;
-  audio.id = `peer-${id}`;
+/** 每个远端成员对应一个 <audio> 元素，避免重复创建导致声音叠加 */
+const peerAudios = new Map();
+
+voice.on('remoteStream', ({ id, stream, existing }) => {
+  if (existing) {
+    // 同一 peer 的新流：直接替换源，不新建元素
+    const el = peerAudios.get(id);
+    if (el) el.srcObject = stream;
+    return;
+  }
+  let audio = peerAudios.get(id);
+  if (!audio) {
+    audio = document.createElement('audio');
+    audio.autoplay = true;
+    audio.id = `peer-${id}`;
+    document.body.appendChild(audio);
+    peerAudios.set(id, audio);
+  }
   audio.srcObject = stream;
-  document.body.appendChild(audio);
+});
+
+voice.on('peerLeft', ({ id }) => {
+  const audio = peerAudios.get(id);
+  if (audio) {
+    audio.pause();
+    audio.srcObject = null;
+    audio.remove();
+    peerAudios.delete(id);
+  }
 });
 
 voice.on('peers', (peers) => {

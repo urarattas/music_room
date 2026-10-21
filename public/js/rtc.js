@@ -178,8 +178,14 @@ export class VoiceRoom extends EventTarget {
 
     pc.ontrack = (e) => {
       const [stream] = e.streams;
+      // 同一 peer 可能触发多次 ontrack（重新协商），
+      // 只保留第一次的流，避免出现重复音轨（声音叠加）
+      if (peer.stream === stream) {
+        this.emit('remoteStream', { id: peerId, stream, existing: true });
+        return;
+      }
       peer.stream = stream;
-      this.emit('remoteStream', { id: peerId, stream });
+      this.emit('remoteStream', { id: peerId, stream, existing: false });
       this._emitPeers();
     };
 
@@ -285,6 +291,21 @@ export class VoiceRoom extends EventTarget {
       connected: p.pc.connectionState === 'connected',
       state: p.pc.connectionState,
     })));
+  }
+
+  /** 成员离开时清理其连接与音轨 */
+  removePeer(peerId) {
+    const peer = this.peers.get(peerId);
+    if (!peer) return;
+    try {
+      peer.pc.close();
+    } catch {
+      /* ignore */
+    }
+    this.peers.delete(peerId);
+    this._pendingCandidates.delete(peerId);
+    this.emit('peerLeft', { id: peerId });
+    this._emitPeers();
   }
 
   _startLevelMeter() {

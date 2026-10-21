@@ -102,6 +102,23 @@ test.after(() => {
   child?.kill();
 });
 
+/**
+ * 请求上游 API 并对 503 做退避重试。
+ * 上游限流 50 次/5 分钟，且 503 是间歇性的，重试可让测试稳定。
+ */
+async function fetchUpstream(path, { retries = 4 } = {}) {
+  let lastStatus = 0;
+  for (let i = 0; i <= retries; i++) {
+    const res = await fetch(`https://music-api.gdstudio.xyz/api.php${path}`, {
+      headers: { Origin: BASE },
+    });
+    lastStatus = res.status;
+    if (res.status !== 503) return res;
+    await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+  }
+  return new Response('', { status: lastStatus });
+}
+
 test('HTTP 静态页与健康检查可用', async () => {
   const res = await fetch(`${BASE}/`);
   assert.equal(res.status, 200);
@@ -129,10 +146,7 @@ test('服务端不再代理音乐 API', async () => {
 });
 
 test('上游 API 支持浏览器跨域直连', async () => {
-  const res = await fetch(
-    'https://music-api.gdstudio.xyz/api.php?types=search&source=netease&name=%E5%91%A8%E6%9D%B0%E4%BC%A6&count=3&pages=1',
-    { headers: { Origin: BASE } }
-  );
+  const res = await fetchUpstream('?types=search&source=netease&name=%E5%91%A8%E6%9D%B0%E4%BC%A6&count=3&pages=1');
   assert.equal(res.status, 200);
   assert.equal(res.headers.get('access-control-allow-origin'), '*', '上游必须允许跨域');
   const list = await res.json();
@@ -257,10 +271,8 @@ test('切换房间：离开旧房间并加入新房间', async () => {
 test('每个客户端可独立从上游获取播放地址', async () => {
   // 模拟两个客户端各自直连上游取地址
   const fetchUrl = async (br) => {
-    const res = await fetch(
-      `https://music-api.gdstudio.xyz/api.php?types=url&source=netease&id=5257138&br=${br}`,
-      { headers: { Origin: BASE } }
-    );
+    const res = await fetchUpstream(`?types=url&source=netease&id=5257138&br=${br}`);
+    assert.equal(res.status, 200, '上游应正常响应');
     return res.json();
   };
   const a = await fetchUrl(320);
@@ -273,12 +285,49 @@ test('每个客户端可独立从上游获取播放地址', async () => {
 });
 
 test('上游歌词接口返回原文与翻译', async () => {
-  const res = await fetch(
-    `https://music-api.gdstudio.xyz/api.php?types=lyric&source=netease&id=451703096`,
-    { headers: { Origin: BASE } }
-  );
+  const res = await fetchUpstream('?types=lyric&source=netease&id=451703096');
   assert.equal(res.status, 200);
   const data = await res.json();
   assert.ok(data.lyric.includes('['), '应返回 LRC 原文');
   assert.ok(typeof data.tlyric === 'string');
+});
+
+test('新成员加入时补发历史聊天记录', async () => {
+  const a = new TestClient('甲', 'hist-room');
+  await a.connect();
+  await a.waitFor((m) => m.t === 'welcome');
+
+  a.send('chat', { text: '第一条消息' });
+  a.send('chat', { text: '第二条消息' });
+  await a.waitFor((m) => m.t === 'chat' && m.text === '第二条消息');
+
+  // 迟到的成员应收到之前的历史
+  const b = new TestClient('乙', 'hist-room');
+  await b.connect();
+  await b.waitFor((m) => m.t === 'welcome');
+
+  const first = await b.waitFor((m) => m.t === 'chat' && m.text === '第一条消息');
+  const second = await b.waitFor((m) => m.t === 'chat' && m.text === '第二条消息');
+  assert.ok(first.ts <= second.ts, '历史记录应按时间顺序补发');
+
+  a.close();
+  b.close();
+});
+
+test('切换房间时不补发旧房间的聊天记录', async () => {
+  const a = new TestClient('甲', 'room-a');
+  await a.connect();
+  await a.waitFor((m) => m.t === 'welcome');
+  a.send('chat', { text: '房间A的消息' });
+  await a.waitFor((m) => m.t === 'chat' && m.text === '房间A的消息');
+
+  // 切到新房间
+  a.send('join', { room: 'room-b', name: '甲' });
+  await a.waitFor((m) => m.t === 'welcome' && m.room.id === 'room-b');
+  // 之后不应再收到旧房间的消息
+  await new Promise((r) => setTimeout(r, 300));
+  const oldMsgs = a.messages.filter((m) => m.t === 'chat' && m.text === '房间A的消息');
+  assert.equal(oldMsgs.length, 1, '旧房间消息只应出现一次');
+
+  a.close();
 });

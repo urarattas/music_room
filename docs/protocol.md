@@ -83,7 +83,7 @@ MusicState = {
 | `welcome` | `{selfId, room:{id,name}, users, playlist, music, serverTime}` | 入房后的初始状态 |
 | `room` | `{room:{id,name}}` | 房间信息变更 |
 | `users` | `{users}` | 成员列表变更 |
-| `chat` | `{from:{id,name}, text, ts}` | 文字消息 |
+| `chat` | `{from:{id,name}, text, ts}` | 文字消息。**入房后服务端会补发最近 50 条历史消息**，格式与实时消息相同 |
 | `music` | `{state: MusicState}` | 播放状态变更 |
 | `playlist` | `{list: Track[]}` | 播放列表变更 |
 | `rtc.signal` | `{from, data}` | 中转的 WebRTC 信令 |

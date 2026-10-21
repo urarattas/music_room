@@ -123,21 +123,52 @@ try {
   step('搜索');
   await setValA('#search-input', '周杰伦');
   await clickA('#search-form button[type=submit]');
-  await pageA.waitForFunction(() => document.querySelectorAll('#search-results .track-item').length > 0, { timeout: 30000, polling: 500 });
-  const searchCount = await pageA.$$eval('#search-results .track-item', (els) => els.length);
+  // 上游 503 是间歇性的，重试几次
+  let searchCount = 0;
+  for (let attempt = 0; attempt < 4 && searchCount === 0; attempt++) {
+    await pageA.waitForFunction(
+      () => document.querySelectorAll('#search-results .track-item').length > 0,
+      { timeout: 20000, polling: 500 }
+    ).catch(() => {});
+    searchCount = await pageA.$$eval('#search-results .track-item', (els) => els.length);
+    if (searchCount === 0) {
+      step(`搜索无结果，重试 ${attempt + 1}/4`);
+      await sleep(3000);
+      await clickA('#search-form button[type=submit]');
+    }
+  }
   check('搜索返回结果', searchCount > 0, `${searchCount} 条`);
+
+  /* ---------------- 分页：加载更多 ---------------- */
+  step('检查加载更多');
+  const moreVisible = await pageA.$eval('#search-more', (e) => !e.hidden);
+  check('满页时显示「加载更多」按钮', moreVisible, `hidden=${!moreVisible}`);
+
+  if (moreVisible) {
+    await clickA('#search-more');
+    await sleep(6000);
+    const afterMore = await pageA.$$eval('#search-results .track-item', (els) => els.length);
+    check(
+      '加载更多可追加结果',
+      afterMore > searchCount,
+      `${searchCount} → ${afterMore}`
+    );
+  }
 
   /* ---------------- 2. 封面 ---------------- */
   step('检查封面');
   // 后台标签页会被 Chrome 限速（定时器节流），前台化后再断言
   await pageA.bringToFront();
-  await pageA.waitForFunction(
-    () => {
-      const imgs = [...document.querySelectorAll('#search-results .track-item img')];
-      return imgs.length > 0 && imgs.filter((i) => i.naturalWidth > 0).length > 0;
-    },
-    { timeout: 60000, polling: 500 }
-  );
+  const thumbReady = await pageA
+    .waitForFunction(
+      () => {
+        const imgs = [...document.querySelectorAll('#search-results .track-item img')];
+        return imgs.length > 0 && imgs.filter((i) => i.naturalWidth > 0).length > 0;
+      },
+      { timeout: 60000, polling: 500 }
+    )
+    .then(() => true)
+    .catch(() => false);
   const thumbOk = await pageA.evaluate(() => {
     const imgs = [...document.querySelectorAll('#search-results .track-item img')];
     return {
@@ -150,7 +181,7 @@ try {
   });
   check(
     '搜索结果缩略图已加载',
-    thumbOk.loaded > 0 && thumbOk.broken === 0,
+    thumbReady && thumbOk.loaded > 0 && thumbOk.broken === 0,
     JSON.stringify(thumbOk)
   );
 
@@ -241,18 +272,21 @@ try {
   check('B 收到播放队列', Number(plB) > 0, `count=${plB}`);
 
   // 主封面
-  await pageA.waitForFunction(
-    () => {
-      const img = document.getElementById('cover');
-      return img.classList.contains('visible') && img.naturalWidth > 0;
-    },
-    { timeout: 30000, polling: 500 }
-  );
+  const coverReady = await pageA
+    .waitForFunction(
+      () => {
+        const img = document.getElementById('cover');
+        return img.classList.contains('visible') && img.naturalWidth > 0;
+      },
+      { timeout: 45000, polling: 500 }
+    )
+    .then(() => true)
+    .catch(() => false);
   const coverOk = await pageA.evaluate(() => {
     const img = document.getElementById('cover');
     return { visible: img.classList.contains('visible'), w: img.naturalWidth };
   });
-  check('主封面已加载', coverOk.visible && coverOk.w > 0, JSON.stringify(coverOk));
+  check('主封面已加载', coverReady && coverOk.visible && coverOk.w > 0, JSON.stringify(coverOk));
 
   /* ---------------- 1. 歌词与翻译 ---------------- */
   step('检查歌词');
@@ -300,6 +334,25 @@ try {
     { timeout: 15000, polling: 500 }
   );
   check('B 收到聊天消息', true);
+
+  /* ---------------- 历史聊天记录补发 ---------------- */
+  step('迟到成员应看到历史消息');
+  const pageC = await browser.newPage();
+  pageC.on('pageerror', (e) => console.log('  [C pageerror]', e.message));
+  await pageC.goto(`${BASE}/?room=uitest`, { waitUntil: 'networkidle2' });
+  await sleep(1000);
+  await pageC.evaluate(() => {
+    document.getElementById('gate-name').value = '迟到者';
+    document.getElementById('gate-room').value = 'uitest';
+    document.getElementById('gate-enter').click();
+  });
+  await pageC.waitForFunction(
+    () => document.getElementById('chat-list').textContent.includes('一起来听歌'),
+    { timeout: 15000, polling: 500 }
+  ).catch(() => {});
+  const historyVisible = await pageC.$eval('#chat-list', (e) => e.textContent.includes('一起来听歌'));
+  check('迟到成员能看到历史聊天记录', historyVisible);
+  await pageC.close();
 
   /* ---------------- 3. 拖动进度条 ---------------- */
   step('检查进度条');

@@ -1,6 +1,10 @@
 /**
  * LRC 歌词解析与滚动展示
  */
+
+/** 翻译行与原文行的时间戳允许的最大偏差（秒） */
+const TIME_TOLERANCE = 0.15;
+
 export class LyricPanel {
   constructor({ listEl, tabsEl }) {
     this.listEl = listEl;
@@ -24,12 +28,7 @@ export class LyricPanel {
   /** @param {{lyric:string, tlyric:string}} data */
   setLyrics(data) {
     this.lines = parseLrc(data?.lyric || '');
-    this.translation = new Map();
-    const tLines = parseLrc(data?.tlyric || '');
-    for (const l of tLines) {
-      // 翻译行与原文行时间戳一一对应
-      this.translation.set(l.time, l.text);
-    }
+    this.translation = matchTranslation(this.lines, parseLrc(data?.tlyric || ''));
     this.activeIndex = -1;
     this._render();
   }
@@ -48,14 +47,7 @@ export class LyricPanel {
       const out = [];
       for (const l of this.lines) {
         const text = this.translation.get(l.time);
-        if (text !== undefined) out.push({ time: l.time, text });
-      }
-      // 原文中找不到对应翻译的行，用原文兜底，保证行数一致
-      if (out.length !== this.lines.length) {
-        for (const l of this.lines) {
-          if (!out.some((o) => o.time === l.time)) out.push({ time: l.time, text: l.text });
-        }
-        out.sort((a, b) => a.time - b.time);
+        out.push({ time: l.time, text: text !== undefined ? text : l.text });
       }
       return out;
     }
@@ -102,6 +94,56 @@ export class LyricPanel {
     const top = target.offsetTop - box.clientHeight / 2 + target.offsetHeight / 2;
     box.scrollTo({ top, behavior: 'smooth' });
   }
+}
+
+/**
+ * 把翻译行对齐到原文行。
+ *
+ * 上游的原文与翻译时间戳**不一定完全相同** —— 实测有的歌两者相差 50ms
+ * （如原文 `[00:01.000]` 对应翻译 `[00:01.050]`）。若用严格相等匹配，
+ * 这些行会被当成"没有翻译"，导致切到翻译标签页时仍显示原文。
+ *
+ * 做法：先按精确时间戳匹配，剩下的用「时间最近且在容差内」的原文行兜底。
+ *
+ * @param {{time:number,text:string}[]} lines 原文行
+ * @param {{time:number,text:string}[]} tLines 翻译行
+ * @returns {Map<number,string>} 原文时间 -> 翻译文本
+ */
+export function matchTranslation(lines, tLines) {
+  const map = new Map();
+  if (!lines.length || !tLines.length) return map;
+
+  const exact = new Map(lines.map((l) => [l.time, l.text]));
+  const used = new Set();
+
+  // 第一轮：精确匹配
+  for (const t of tLines) {
+    if (exact.has(t.time)) {
+      map.set(t.time, t.text);
+      used.add(t.time);
+    }
+  }
+
+  // 第二轮：容差匹配（取最近的未占用原文行）
+  for (const t of tLines) {
+    if (map.has(t.time)) continue;
+    let best = null;
+    let bestDiff = Infinity;
+    for (const l of lines) {
+      if (used.has(l.time)) continue;
+      const diff = Math.abs(l.time - t.time);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = l;
+      }
+    }
+    if (best && bestDiff <= TIME_TOLERANCE) {
+      map.set(best.time, t.text);
+      used.add(best.time);
+    }
+  }
+
+  return map;
 }
 
 /**
