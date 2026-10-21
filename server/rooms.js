@@ -1,8 +1,10 @@
 /**
  * 房间管理：成员、播放列表、播放状态、聊天记录
+ *
+ * 注意：这里只保存曲目的 **ID 与元数据**，不保存播放地址。
+ * 每个客户端收到广播后，各自独立向上游获取播放地址并直连播放。
  */
 import { randomUUID } from 'node:crypto';
-import { musicApi } from './music.js';
 
 const MAX_USERS_PER_ROOM = 20;
 const MAX_CHAT_HISTORY = 200;
@@ -221,4 +223,4 @@ export class RoomRegistry {
   }
 }
 
-export { musicApi, MAX_USERS_PER_ROOM };
+export { MAX_USERS_PER_ROOM };

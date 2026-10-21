@@ -1,5 +1,6 @@
-/** 搜索面板 */
+/** 搜索面板 —— 直接调用 GD 音乐台 API（浏览器直连，不经服务端） */
 import { isVisible } from './cover-loader.js';
+import { gdApi } from './gd-api.js';
 
 export class SearchPanel {
   constructor({ listEl, formEl, inputEl, sourceEl, statusEl, onPick, onAdd, coverLoader }) {
@@ -51,29 +52,41 @@ export class SearchPanel {
       this.statusEl.textContent = '请输入关键字';
       return;
     }
+    const source = this.sourceEl.value;
     this.statusEl.textContent = '搜索中…';
     try {
-      const params = new URLSearchParams({
-        source: this.sourceEl.value,
-        name,
-        count: '30',
-        pages: String(pages),
-      });
-      const res = await fetch(`/api/search?${params}`);
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `HTTP ${res.status}`);
-      }
-      const data = await res.json();
-      this.results = data.list || [];
+      // 浏览器直连 GD 音乐台 API
+      const list = await gdApi.searchTracks({ source, name, count: 30, pages });
+      this.results = list || [];
+      this.statusEl.style.color = '';
       this.statusEl.textContent = this.results.length
         ? `找到 ${this.results.length} 首`
         : '没有找到相关歌曲';
       this.render();
+
+      // 提醒：该音源可能搜得到但播不了（上游部分音源的 url 端点返回空）
+      if (this.results.length) this._warnIfUnplayable(source);
     } catch (err) {
       this.statusEl.textContent = `搜索失败：${err.message}`;
+      this.statusEl.style.color = 'var(--danger)';
       this.results = [];
       this.render();
+    }
+  }
+
+  /** 探测音源是否能播放，有问题则给出提示 */
+  async _warnIfUnplayable(source) {
+    if (this._probed?.has(source)) return;
+    this._probed = this._probed || new Set();
+    this._probed.add(source);
+    try {
+      const { ok, message } = await gdApi.probeSource(source);
+      if (!ok) {
+        this.statusEl.textContent = `⚠ ${message}`;
+        this.statusEl.style.color = 'var(--danger)';
+      }
+    } catch {
+      /* 忽略 */
     }
   }
 
@@ -91,8 +104,14 @@ export class SearchPanel {
       if (track.pic_id) {
         img.dataset.track = JSON.stringify({ source: track.source, pic_id: track.pic_id });
         if (!this.coverLoader) {
-          img.src = `/img/pic?source=${encodeURIComponent(track.source)}&id=${encodeURIComponent(track.pic_id)}&size=300`;
-          img.onerror = () => img.remove();
+          // 没有加载器时直接取地址（浏览器直连上游）
+          gdApi
+            .getTrackPic({ source: track.source, id: track.pic_id, size: 300 })
+            .then(({ url }) => {
+              if (url) img.src = url;
+              else img.remove();
+            })
+            .catch(() => img.remove());
         }
       }
 

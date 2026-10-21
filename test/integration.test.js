@@ -110,15 +110,33 @@ test('HTTP 静态页与健康检查可用', async () => {
 
   const health = await (await fetch(`${BASE}/api/health`)).json();
   assert.equal(health.ok, true);
+  // 告知客户端上游地址，供浏览器直连
+  assert.match(health.upstream, /music-api\.gdstudio\.xyz/);
 });
 
-test('HTTP 搜索代理返回曲目列表', async () => {
-  const res = await fetch(`${BASE}/api/search?name=${encodeURIComponent('周杰伦')}&count=3&source=netease`);
+test('服务端不再代理音乐 API', async () => {
+  // 这些接口已移除，应全部返回 404
+  for (const p of [
+    '/api/search?name=test',
+    '/api/url?id=1',
+    '/api/lyric?id=1',
+    '/api/pic?id=1',
+    '/img/pic?id=1',
+  ]) {
+    const res = await fetch(`${BASE}${p}`);
+    assert.equal(res.status, 404, `${p} 应返回 404`);
+  }
+});
+
+test('上游 API 支持浏览器跨域直连', async () => {
+  const res = await fetch(
+    'https://music-api.gdstudio.xyz/api.php?types=search&source=netease&name=%E5%91%A8%E6%9D%B0%E4%BC%A6&count=3&pages=1',
+    { headers: { Origin: BASE } }
+  );
   assert.equal(res.status, 200);
-  const { list } = await res.json();
-  assert.ok(Array.isArray(list) && list.length > 0, '应返回至少一条搜索结果');
-  assert.ok(list[0].id);
-  assert.ok(Array.isArray(list[0].artist));
+  assert.equal(res.headers.get('access-control-allow-origin'), '*', '上游必须允许跨域');
+  const list = await res.json();
+  assert.ok(Array.isArray(list) && list.length > 0);
 });
 
 test('房间：加入、成员广播、聊天', async () => {
@@ -159,8 +177,11 @@ test('播放状态在房间内同步', async () => {
 
   const music = await b.waitFor((m) => m.t === 'music' && m.state.track?.id === '5257138', 20000);
   assert.equal(music.state.playing, true);
-  assert.ok(music.state.track.url, '服务端应补全播放地址');
   assert.equal(music.state.track.source, 'netease');
+  // 服务端只广播 ID 与元数据，不应包含播放地址
+  assert.equal(music.state.track.url, undefined, '服务端不应广播播放地址');
+  assert.ok(music.state.track.id, '应广播曲目 ID');
+  assert.ok(music.state.track.name, '应广播曲目名称');
 
   // 暂停同步
   a.send('music.pause', {});
@@ -233,19 +254,29 @@ test('切换房间：离开旧房间并加入新房间', async () => {
   b.close();
 });
 
-test('封面接口可用并返回图片', async () => {
-  const res = await fetch(`${BASE}/img/pic?source=netease&id=109951163038292176&size=300`);
-  assert.equal(res.status, 200);
-  assert.match(res.headers.get('content-type') || '', /image/);
-  const buf = Buffer.from(await res.arrayBuffer());
-  assert.ok(buf.length > 1000, '封面应有内容');
-  // JPEG 魔数
-  assert.equal(buf[0], 0xff);
-  assert.equal(buf[1], 0xd8);
+test('每个客户端可独立从上游获取播放地址', async () => {
+  // 模拟两个客户端各自直连上游取地址
+  const fetchUrl = async (br) => {
+    const res = await fetch(
+      `https://music-api.gdstudio.xyz/api.php?types=url&source=netease&id=5257138&br=${br}`,
+      { headers: { Origin: BASE } }
+    );
+    return res.json();
+  };
+  const a = await fetchUrl(320);
+  const b = await fetchUrl(128);
+  assert.ok(a.url, '应能取到播放地址');
+  assert.ok(b.url, '应能取到播放地址');
+  // 两个客户端可以选不同音质
+  assert.equal(a.br, 320);
+  assert.equal(b.br, 128);
 });
 
-test('歌词接口返回原文与翻译', async () => {
-  const res = await fetch(`${BASE}/api/lyric?source=netease&id=451703096`);
+test('上游歌词接口返回原文与翻译', async () => {
+  const res = await fetch(
+    `https://music-api.gdstudio.xyz/api.php?types=lyric&source=netease&id=451703096`,
+    { headers: { Origin: BASE } }
+  );
   assert.equal(res.status, 200);
   const data = await res.json();
   assert.ok(data.lyric.includes('['), '应返回 LRC 原文');

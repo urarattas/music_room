@@ -5,6 +5,7 @@ import { SearchPanel } from './search.js';
 import { VoiceRoom } from './rtc.js';
 import { LyricPanel } from './lyrics.js';
 import { coverLoader } from './cover-loader.js';
+import { gdApi } from './gd-api.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -27,6 +28,7 @@ const el = {
   searchForm: $('search-form'),
   searchInput: $('search-input'),
   searchSource: $('search-source'),
+  quality: $('quality'),
   searchStatus: $('search-status'),
   searchResults: $('search-results'),
   playlist: $('playlist'),
@@ -131,8 +133,18 @@ loadActiveRooms();
 
 /* ------------------------------ 客户端实例 ------------------------------ */
 
+// 恢复上次选择的音质
+const savedQuality = Number(localStorage.getItem('mr_quality'));
+if (savedQuality && [128, 192, 320, 740, 999].includes(savedQuality)) {
+  el.quality.value = String(savedQuality);
+}
+
 const client = new RoomClient({ room: roomName, name: userName, autoJoin: false });
-const player = new MusicPlayer({ client, audioEl: el.audio });
+const player = new MusicPlayer({
+  client,
+  audioEl: el.audio,
+  quality: Number(el.quality?.value) || 320,
+});
 const voice = new VoiceRoom({ client });
 const lyrics = new LyricPanel({ listEl: el.lyricList, tabsEl: el.lyricTabs });
 
@@ -208,6 +220,18 @@ el.btnPlay.onclick = () => player.toggle();
 el.btnPrev.onclick = () => client.send('playlist.prev', {});
 el.btnNext.onclick = () => client.send('playlist.next', {});
 
+// 音质：每个客户端独立生效，不影响房间内其他人
+el.quality.addEventListener('change', () => {
+  const br = Number(el.quality.value) || 320;
+  player.quality = br;
+  localStorage.setItem('mr_quality', String(br));
+  // 重新获取当前曲目的播放地址
+  if (player.state.track) {
+    player.reload();
+  }
+  el.micHint.textContent = `音质已切换为 ${el.quality.selectedOptions[0].textContent}`;
+});
+
 let seeking = false;
 el.seek.addEventListener('pointerdown', () => (seeking = true));
 el.seek.addEventListener('pointerup', () => (seeking = false));
@@ -279,7 +303,7 @@ player.on('track', (track) => {
   loadLyrics(track);
 });
 
-/** 拉取并展示歌词 */
+/** 拉取并展示歌词（浏览器直连上游，不经服务端） */
 async function loadLyrics(track) {
   if (!track?.lyric_id) {
     lyricTrackId = null;
@@ -290,13 +314,10 @@ async function loadLyrics(track) {
   if (key === lyricTrackId) return;
   lyricTrackId = key;
   try {
-    const params = new URLSearchParams({
+    const data = await gdApi.getTrackLyric({
       source: track.source || 'netease',
       id: track.lyric_id,
     });
-    const res = await fetch(`/api/lyric?${params}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
     // 防止竞态：期间已切歌
     if (lyricTrackId !== key) return;
     lyrics.setLyrics(data);
@@ -306,8 +327,20 @@ async function loadLyrics(track) {
 }
 
 player.on('error', (e) => {
-  el.micHint.textContent = e?.msg || '播放出现问题';
-  console.warn('[player]', e?.msg);
+  const msg = e?.msg || '播放出现问题';
+  el.micHint.textContent = msg;
+  el.searchStatus.textContent = `⚠ ${msg}`;
+  el.searchStatus.style.color = 'var(--danger)';
+  console.warn('[player]', msg);
+});
+
+player.on('loading', ({ track, loading }) => {
+  if (loading && track) {
+    el.searchStatus.textContent = `正在获取「${track.name}」的播放地址…`;
+    el.searchStatus.style.color = '';
+  } else if (!loading) {
+    el.searchStatus.textContent = '';
+  }
 });
 
 player.on('blocked', () => {

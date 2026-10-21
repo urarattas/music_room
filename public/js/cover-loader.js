@@ -1,16 +1,20 @@
 /**
  * 封面渐进加载器
  *
- * 上游 API 配额有限（50 次 / 5 分钟）且单次响应慢（~1s），
- * 不能一次性把所有封面都拉回来，否则会挤占播放地址与歌词的配额，
- * 用户也会等很久才看到第一张图。
+ * 封面地址由浏览器直连 GD 音乐台获取（`gd-api.js`），
+ * 图片本身再从上游 CDN 直接加载，全过程不经过我们的服务端。
+ *
+ * 之所以要渐进加载：
+ * 上游有 50 次 / 5 分钟的配额，且单次响应约 1.3 秒。
+ * 一次性把 30 张封面全拉回来，既慢又会挤占播放地址与歌词的配额。
  *
  * 做法：
  * - 只加载"可视区域"内的封面（滚动列表时再补）
- * - 限制并发数（默认 3）
+ * - 限制并发数
  * - 按优先级排序：当前播放 > 可视区域 > 列表其余部分
- * - 服务端对封面请求走低优先级队列，播放/歌词请求可随时插队
  */
+import { gdApi } from './gd-api.js';
+
 export class CoverLoader {
   constructor({ concurrency = 3 } = {}) {
     this.concurrency = concurrency;
@@ -21,7 +25,7 @@ export class CoverLoader {
 
   /**
    * @param {HTMLImageElement} img
-   * @param {{source:string,pic_id:string,size?:number}} track
+   * @param {{source:string,pic_id:string}} track
    * @param {number} priority 数字越小越优先
    * @param {{removeOnError?:boolean}} opts
    */
@@ -57,7 +61,6 @@ export class CoverLoader {
   async _load({ img, track, removeOnError }) {
     const { source, pic_id: picId } = track;
     const size = track.size || 300;
-    const url = `/img/pic?source=${encodeURIComponent(source)}&id=${encodeURIComponent(picId)}&size=${size}`;
     img.dataset.coverState = 'loading';
     img.onerror = () => {
       img.dataset.coverState = 'error';
@@ -66,8 +69,15 @@ export class CoverLoader {
     img.onload = () => {
       img.dataset.coverState = 'loaded';
     };
-    // 浏览器会自动跟随服务端的 302 跳转
-    img.src = url;
+    try {
+      // 浏览器直连上游取封面地址
+      const { url } = await gdApi.getTrackPic({ source, id: picId, size });
+      if (!url) throw new Error('no cover');
+      img.src = url;
+    } catch {
+      img.dataset.coverState = 'error';
+      if (removeOnError) img.remove();
+    }
   }
 }
 

@@ -10,14 +10,18 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 
-import { musicApi } from './music.js';
 import { RoomRegistry } from './rooms.js';
-import { getCachedCover, storeCover } from './cover-cache.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '..', 'public');
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
+
+/**
+ * GD 音乐台上游地址。
+ * 服务端不会调用它，仅告知客户端，让浏览器直连。
+ */
+const UPSTREAM = 'https://music-api.gdstudio.xyz/api.php';
 
 const registry = new RoomRegistry();
 
@@ -92,123 +96,33 @@ async function serveStatic(req, res, urlPath) {
   }
 }
 
-async function handleApi(req, res, url) {
+/**
+ * 服务端自身的接口。
+ *
+ * 注意：**这里不再代理音乐 API**。
+ * 音乐相关的数据（搜索结果、播放地址、封面、歌词）全部由浏览器直连
+ * GD 音乐台获取，服务端只负责广播曲目 ID 与元数据。
+ * 这样服务端完全不消耗上游配额，音频流量也不经过服务器。
+ */
+function handleApi(req, res, url) {
   const p = url.pathname;
-  const q = url.searchParams;
 
   if (p === '/api/health') {
-    return sendJson(res, 200, { ok: true, rooms: registry.rooms.size, uptime: process.uptime() });
+    return sendJson(res, 200, {
+      ok: true,
+      rooms: registry.rooms.size,
+      uptime: process.uptime(),
+      // 告知客户端上游地址，便于前端直连
+      upstream: UPSTREAM,
+    });
   }
   if (p === '/api/rooms') {
     return sendJson(res, 200, { rooms: registry.list() });
   }
-  if (p === '/api/search') {
-    const list = await musicApi.searchTracks({
-      source: q.get('source') || 'netease',
-      name: q.get('name') || '',
-      count: Math.min(50, Number(q.get('count')) || 20),
-      pages: Math.max(1, Number(q.get('pages')) || 1),
-    });
-    // 立即返回，不等待封面 —— 封面由前端渐进加载（/img/pic），
-    // 否则 20+ 个封面请求会把上游配额耗尽，拖垮播放与歌词。
-    return sendJson(res, 200, { list });
-  }
-  if (p === '/api/url') {
-    const r = await musicApi.getTrackUrl({
-      source: q.get('source') || 'netease',
-      id: q.get('id'),
-      br: Number(q.get('br')) || 320,
-    });
-    return sendJson(res, 200, r);
-  }
-  if (p === '/api/pic') {
-    try {
-      const r = await musicApi.getTrackPic({
-        source: q.get('source') || 'netease',
-        id: q.get('id'),
-        size: Number(q.get('size')) || 300,
-      });
-      return sendJson(res, 200, r);
-    } catch {
-      // 封面缺失不应影响页面
-      return sendJson(res, 200, { url: null });
-    }
-  }
-  if (p === '/api/lyric') {
-    try {
-      const r = await musicApi.getTrackLyric({
-        source: q.get('source') || 'netease',
-        id: q.get('id'),
-      });
-      return sendJson(res, 200, r);
-    } catch {
-      return sendJson(res, 200, { lyric: '', tlyric: '' });
-    }
+  if (p === '/api/config') {
+    return sendJson(res, 200, { upstream: UPSTREAM });
   }
   return sendJson(res, 404, { error: 'unknown api' });
-}
-
-/**
- * 提供封面图片。
- *
- * 优先返回本地缓存的图片（快，且不消耗上游配额）；
- * 未命中时向上游要地址、把图片存到本地，再返回。
- */
-async function handlePicRedirect(req, res, url) {
-  const q = url.searchParams;
-  const source = q.get('source') || 'netease';
-  const id = q.get('id');
-  const size = Number(q.get('size')) || 300;
-  if (!id) {
-    res.writeHead(400).end();
-    return;
-  }
-  const key = `${source}_${id}_${size}`;
-
-  // 命中本地缓存
-  const cached = getCachedCover(key);
-  if (cached) {
-    await serveCachedImage(res, cached);
-    return;
-  }
-
-  try {
-    const r = await musicApi.getTrackPic({ source, id, size });
-    if (!r.url) {
-      res.writeHead(404).end();
-      return;
-    }
-    // 下载并缓存到本地
-    const local = await storeCover(key, r.url);
-    if (local) {
-      await serveCachedImage(res, local);
-      return;
-    }
-    // 下载失败则直接跳转
-    res.writeHead(302, {
-      location: r.url,
-      'cache-control': 'public, max-age=86400',
-    });
-    res.end();
-  } catch {
-    res.writeHead(404).end();
-  }
-}
-
-/** 返回本地缓存的图片文件 */
-async function serveCachedImage(res, filePath) {
-  try {
-    const stat = await fsp.stat(filePath);
-    const ext = path.extname(filePath).toLowerCase();
-    res.writeHead(200, {
-      'content-type': MIME[ext] || 'image/jpeg',
-      'content-length': stat.size,
-      'cache-control': 'public, max-age=604800',
-    });
-    fs.createReadStream(filePath).pipe(res);
-  } catch {
-    res.writeHead(404).end();
-  }
 }
 
 const server = http.createServer(async (req, res) => {
@@ -224,11 +138,7 @@ const server = http.createServer(async (req, res) => {
   }
   try {
     if (url.pathname.startsWith('/api/')) {
-      await handleApi(req, res, url);
-      return;
-    }
-    if (url.pathname === '/img/pic') {
-      await handlePicRedirect(req, res, url);
+      handleApi(req, res, url);
       return;
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -237,8 +147,7 @@ const server = http.createServer(async (req, res) => {
     }
     await serveStatic(req, res, url.pathname);
   } catch (err) {
-    const code = err?.code === 'BAD_REQUEST' ? 400 : err?.code === 'RATE_LIMITED' ? 429 : 500;
-    sendJson(res, code, { error: err?.message || 'internal error', code: err?.code || 'INTERNAL' });
+    sendJson(res, 500, { error: err?.message || 'internal error' });
   }
 });
 
@@ -273,36 +182,26 @@ function broadcastPlaylist(room) {
   broadcast(room, 'playlist', { list: room.playlist });
 }
 
-async function ensureTrackUrl(room, track) {
-  if (!track) return null;
-  if (track.url) return track;
-  try {
-    const { url, br, size } = await musicApi.getTrackUrl({
-      source: track.source || 'netease',
-      id: track.id,
-      br: 320,
-    });
-    track.url = url;
-    track.br = br;
-    track.size = size;
-    return track;
-  } catch (err) {
-    // 播放地址获取失败，尝试一次不带 source 的调用
-    try {
-      const { url, br, size } = await musicApi.getTrackUrl({ id: track.id, br: 320 });
-      track.url = url;
-      track.br = br;
-      track.size = size;
-      return track;
-    } catch {
-      console.warn('[music] 获取播放地址失败:', track.id, err?.message);
-      return track;
-    }
-  }
+/**
+ * 规范化客户端提交的曲目。
+ *
+ * 服务端只保留 **ID 与元数据**，不包含播放地址 ——
+ * 每个客户端收到广播后，会各自独立向上游获取播放地址并直连播放。
+ */
+function sanitizeTrack(raw) {
+  if (!raw || !raw.id) return null;
+  return {
+    id: String(raw.id),
+    name: String(raw.name ?? ''),
+    artist: Array.isArray(raw.artist) ? raw.artist.map(String) : raw.artist ? [String(raw.artist)] : [],
+    album: String(raw.album ?? ''),
+    pic_id: raw.pic_id ? String(raw.pic_id) : null,
+    lyric_id: raw.lyric_id ? String(raw.lyric_id) : null,
+    source: String(raw.source ?? 'netease'),
+  };
 }
 
-async function playTrack(room, track, pos = 0) {
-  await ensureTrackUrl(room, track);
+function playTrack(room, track, pos = 0) {
   room.setTrack(track, { playing: true, pos: Math.max(0, Number(pos) || 0) });
   broadcastMusic(room);
 }
@@ -388,10 +287,10 @@ wss.on('connection', (ws, req) => {
         case 'music.play': {
           const { room } = conn;
           if (!room) return sendTo(ws, 'error', { msg: '尚未加入房间' });
-          const track = msg.track;
-          if (!track || !track.id) return sendTo(ws, 'error', { msg: '无效的曲目' });
+          const track = sanitizeTrack(msg.track);
+          if (!track) return sendTo(ws, 'error', { msg: '无效的曲目' });
           room.addToPlaylist(track);
-          await playTrack(room, track, msg.pos);
+          playTrack(room, track, msg.pos);
           broadcastPlaylist(room);
           break;
         }
@@ -423,7 +322,9 @@ wss.on('connection', (ws, req) => {
         case 'playlist.add': {
           const { room } = conn;
           if (!room) return;
-          if (room.addToPlaylist(msg.track)) broadcastPlaylist(room);
+          const track = sanitizeTrack(msg.track);
+          if (!track) return;
+          if (room.addToPlaylist(track)) broadcastPlaylist(room);
           break;
         }
 
@@ -442,7 +343,7 @@ wss.on('connection', (ws, req) => {
           const next =
             msg.t === 'playlist.next' ? room.nextTrack(cur) : room.prevTrack(cur);
           if (!next) return;
-          await playTrack(room, next, 0);
+          playTrack(room, next, 0);
           break;
         }
 
@@ -505,7 +406,8 @@ wss.on('connection', (ws, req) => {
 server.listen(PORT, HOST, () => {
   console.log(`🎵 音乐听歌房已启动: http://localhost:${PORT}`);
   console.log(`   WebSocket: ws://localhost:${PORT}/ws`);
-  console.log(`   音乐来源: GD Studio 音乐台 API (music.gdstudio.org)`);
+  console.log(`   音乐来源: GD Studio 音乐台 API（浏览器直连，服务端不代理）`);
+  console.log(`   上游地址: ${UPSTREAM}`);
 });
 
 export { server, registry };

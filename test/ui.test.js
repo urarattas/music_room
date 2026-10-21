@@ -74,6 +74,20 @@ try {
   await pageB.goto(`${BASE}/?room=uitest`, { waitUntil: 'networkidle2' });
   await sleep(1200);
 
+  // 记录所有发往本服务器的音乐相关请求（应为空）
+  const serverMusicRequests = [];
+  const watchPage = (p) => {
+    p.on('request', (r) => {
+      const u = r.url();
+      if (!u.startsWith(BASE)) return;
+      if (/\/api\/(search|url|lyric|pic)|\/img\/pic/.test(u)) {
+        serverMusicRequests.push(u);
+      }
+    });
+  };
+  watchPage(pageA);
+  watchPage(pageB);
+
   /* ---------------- 4. 入口页：先输入昵称和房间号 ---------------- */
   step('检查入口页');
   const gateVisible = await pageA.$eval('#gate', (e) => !e.classList.contains('hidden'));
@@ -160,7 +174,7 @@ try {
     `${beforeScroll} → ${afterScroll.loaded}, 坏图 ${afterScroll.broken}`
   );
 
-  /* ---------------- 播放 ---------------- */
+  /* ---------------- 播放（各客户端独立直连上游） ---------------- */
   step('播放第一首');
   await clickA('#search-results .track-item .icon-btn');
   await pageA.waitForFunction(() => document.getElementById('np-title').textContent !== '未在播放', { timeout: 30000, polling: 500 });
@@ -174,6 +188,54 @@ try {
   );
   const titleB = await pageB.$eval('#np-title', (e) => e.textContent.trim());
   check('B 同步到同一首曲目', titleB === titleA, `${titleB} / ${titleA}`);
+
+  // 播放地址必须来自上游 CDN，而不是我们的服务端
+  // （取地址是异步的，需要等 src 写入）
+  await pageA.waitForFunction(
+    () => {
+      const a = document.getElementById('audio');
+      return !!a.src && a.src.startsWith('http');
+    },
+    { timeout: 30000, polling: 500 }
+  );
+  const audioSrc = await pageA.evaluate(() => {
+    const a = document.getElementById('audio');
+    return { src: a.src, ourServer: a.src.includes(location.host), host: new URL(a.src).hostname };
+  });
+  check(
+    '播放地址直连上游 CDN（不经服务端）',
+    !audioSrc.ourServer && /^https?:\/\//.test(audioSrc.src),
+    `${audioSrc.host} | ${audioSrc.src.slice(0, 50)}`
+  );
+
+  // 两个客户端各自独立取到了地址
+  await pageB.waitForFunction(
+    () => {
+      const a = document.getElementById('audio');
+      return !!a.src && a.src.startsWith('http');
+    },
+    { timeout: 30000, polling: 500 }
+  );
+  const bothHaveUrl = await Promise.all(
+    [pageA, pageB].map((p) =>
+      p.evaluate(() => {
+        const a = document.getElementById('audio');
+        return { has: !!a.src && a.src.startsWith('http'), host: a.src ? new URL(a.src).hostname : null };
+      })
+    )
+  );
+  check(
+    '每个客户端各自取到播放地址',
+    bothHaveUrl.every((x) => x.has),
+    JSON.stringify(bothHaveUrl)
+  );
+
+  // 整个过程不应有任何音乐数据请求经过服务端
+  check(
+    '音乐数据完全不经服务端代理',
+    serverMusicRequests.length === 0,
+    serverMusicRequests.length ? serverMusicRequests.join(', ') : '无'
+  );
 
   const plB = await pageB.$eval('#playlist-count', (e) => e.textContent.trim());
   check('B 收到播放队列', Number(plB) > 0, `count=${plB}`);

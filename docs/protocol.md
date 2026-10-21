@@ -4,22 +4,23 @@ WebSocket 端点：`ws://<host>:<port>/ws`（同源，前端使用 `location` �
 
 所有消息均为 JSON 文本帧，字段 `t` 表示消息类型。
 
+> **重要**：服务端**不代理音乐 API**。它只广播曲目 **ID 与元数据**，
+> 每个客户端收到广播后，各自直连 `https://music-api.gdstudio.xyz/api.php`
+> 获取播放地址 / 封面 / 歌词，并直接从上游 CDN 拉流播放。
+
 ## 数据结构
 
 ```ts
 Track = {
-  id: string,          // 曲目 ID（track_id）
+  id: string,          // 曲目 ID（track_id）—— 各客户端据此向上游取地址
   name: string,
   artist: string[],    // 歌手数组
   album: string,
-  pic: string,         // 封面 URL（可为 null）
-  pic_id: string,
+  pic_id: string,      // 封面 ID（bilibili 等音源本身即为完整 URL）
   lyric_id: string,
-  source: string,      // netease / joox / bilibili ...
-  url?: string,        // 播放地址，由服务端获取
-  br?: number,
-  size?: number
+  source: string       // netease / joox / bilibili ...
 }
+// 注意：Track 中**没有** url / br / size —— 播放地址由各客户端独立获取
 
 User = {
   id: string,          // 连接级用户 ID
@@ -41,17 +42,22 @@ MusicState = {
 
 ## HTTP 接口
 
+服务端只提供房间相关接口，**没有任何音乐代理接口**：
+
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/search?source=&name=&count=&pages=` | 搜索歌曲，返回 `Track[]`（**不含**封面地址，封面走 `/img/pic`） |
-| GET | `/api/url?source=&id=&br=` | 获取播放地址，返回 `{url, br, size}` |
-| GET | `/api/pic?source=&id=&size=` | 获取封面 URL，返回 `{url}` |
-| GET | `/img/pic?source=&id=&size=` | 返回封面**图片本体**（本地缓存优先），供 `<img src>` 直接使用 |
-| GET | `/api/lyric?source=&id=` | 获取歌词，返回 `{lyric, tlyric}` |
 | GET | `/api/rooms` | 房间列表：`{rooms:[{id,name,users,capacity}]}` |
-| GET | `/api/health` | 健康检查 |
+| GET | `/api/health` | 健康检查：`{ok, rooms, uptime, upstream}` |
+| GET | `/api/config` | 返回 `{upstream}`，告知客户端上游地址 |
 
-所有 `/api/*` 均代理到 `https://music-api.gdstudio.xyz/api.php` 并在服务端缓存（上游限流 5 分钟 50 次）。
+音乐数据由客户端直连上游获取（上游已开启 `Access-Control-Allow-Origin: *`）：
+
+| 上游参数 | 说明 |
+| --- | --- |
+| `types=search&source=&name=&count=&pages=` | 搜索歌曲 |
+| `types=url&source=&id=&br=` | 获取播放地址 |
+| `types=pic&source=&id=&size=` | 获取封面地址 |
+| `types=lyric&source=&id=` | 获取歌词 |
 
 ## 客户端 → 服务端
 
@@ -91,7 +97,13 @@ MusicState = {
 2. 客户端通过 `ping/pong` 估算时钟偏移：`offset = serverTime - (t0 + t1) / 2`（客户端时钟 → 服务端时钟）。
 3. 客户端期望位置 `pos = (serverNow + offset) - startAt`。
 4. 收到 `music` 消息或每 2 秒校正一次，若 `|actualPos - expectedPos| > 0.35s` 则 seek，否则保持播放。
-5. 播放地址由服务端按需获取并缓存（上游 URL 有有效期，约 20 分钟），获取失败时服务端会重试并广播新的 `music` 消息。
+5. **播放地址由各客户端独立获取**：
+   - 收到曲目变化的 `music` 消息后，本客户端向 GD 音乐台请求该曲目的播放地址
+     （`types=url&source=&id=&br=`），并**直接从上游 CDN 拉流**播放
+   - 客户端本地缓存播放地址约 4 分钟；上游 URL 有效期约 20 分钟
+   - 播放失败（地址过期 / 网络问题）时，客户端自动重新取一次地址
+   - 各客户端可选择不同音质（128 / 192 / 320 / 740 无损），互不影响
+6. 服务端广播的曲目**不含播放地址**，因此某客户端取地址失败不会影响其他成员。
 
 ## WebRTC 语音（Mesh）
 

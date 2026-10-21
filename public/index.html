@@ -68,10 +68,16 @@
           <h2 class="block-title">歌曲搜索</h2>
           <form id="search-form" class="search-form">
             <input id="search-input" class="input" placeholder="歌名 / 歌手 / 专辑" autocomplete="off" />
-            <select id="search-source" class="select">
+            <select id="search-source" class="select" title="音乐源">
               <option value="netease">网易云</option>
               <option value="joox">Joox</option>
               <option value="bilibili">B站</option>
+            </select>
+            <select id="quality" class="select" title="音质（各客户端独立生效）">
+              <option value="128">128K</option>
+              <option value="192">192K</option>
+              <option value="320" selected>320K</option>
+              <option value="740">无损</option>
             </select>
             <button class="btn btn-primary" type="submit">搜索</button>
           </form>
