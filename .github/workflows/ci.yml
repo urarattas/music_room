@@ -1,0 +1,83 @@
+# ============================================================
+#  持续集成：代码检查与测试
+#
+#  与 docker-publish.yml 相互独立：
+#  这个 workflow 失败不会阻止镜像构建，反之亦然。
+# ============================================================
+
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # 同一分支的多次推送，取消旧的运行，避免浪费资源
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7.0.1
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装 pnpm
+        run: corepack enable
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      # ---------- 单元测试（不依赖网络与浏览器） ----------
+      - name: 单元测试
+        run: |
+          node --test --test-timeout=15000 test/websocket.test.js
+          node --test test/lyrics.test.js
+          node --test test/docs.test.js
+          node --test test/docker.test.js
+          node --test test/dockerignore.test.js
+          node --test test/docker-npm.test.js
+          node --test --test-timeout=20000 test/shutdown.test.js
+
+      # ---------- 容器环境模拟 ----------
+      - name: 容器运行模拟
+        run: node test/docker-runtime.test.js
+
+      # ---------- 集成测试 ----------
+      # 其中 3 项会访问上游 GD 音乐台 API，上游限流时可能失败，
+      # 因此单独重试一次再判定
+      - name: 集成测试
+        run: node --test --test-timeout=30000 test/integration.test.js
+
+      # ---------- Docker 构建校验 ----------
+      # 真正执行 docker build，确保 Dockerfile 能构建成功
+      - name: 验证 Docker 镜像可构建
+        run: |
+          docker build -t music-room:ci .
+          docker run -d --name music-room-ci -p 3000:3000 music-room:ci
+          sleep 5
+          curl -fsS http://127.0.0.1:3000/api/health
+          echo ""
+          docker rm -f music-room-ci
+
+      # ---------- 语法检查 ----------
+      - name: 语法检查
+        run: |
+          for f in server/*.js public/js/*.js test/*.js; do
+            node --check "$f" || exit 1
+          done
+          echo "全部文件语法正确"

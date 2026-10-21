@@ -24,6 +24,7 @@
 | 🖼️ 封面 | 直连上游取地址，渐进加载只拉取可视区域内的封面 |
 | 👥 成员列表 | 头像、昵称、开麦状态指示 |
 | 🔗 房间邀请 | 房间名 + 分享链接（`?room=<房间名>`） |
+| 🐳 Docker | 一键构建运行镜像；GitHub Actions 自动构建并推送到 GHCR |
 
 ## 技术栈
 
@@ -94,6 +95,17 @@ docker run -d --name music-room -p 3000:3000 --restart unless-stopped music-room
 ```
 
 容器内自带 Node.js，**宿主机不需要装任何东西**。详见 [`docs/docker.md`](docs/docker.md)。
+
+**想直接拉现成的镜像？** 仓库已配置 GitHub Actions，推送代码后会自动构建
+并推送到 GitHub Container Registry：
+
+```bash
+docker pull ghcr.io/urarattas/music_room:latest
+docker run -d -p 3000:3000 ghcr.io/urarattas/music_room:latest
+```
+
+镜像默认私有，拉取前需 `docker login ghcr.io`。
+构建流程与权限设置见 [`docs/docker.md`](docs/docker.md#github-actions-自动构建)。
 
 ### 方式二：一键脚本（推荐用于本机）
 
@@ -210,6 +222,7 @@ music_room/
 │   ├── docker-runtime.test.js# 模拟容器运行验证
 │   ├── docker-e2e.mjs        # Docker 构建流程端到端模拟
 │   ├── shutdown.test.js      # 优雅退出测试
+│   ├── workflow.test.js      # GitHub Actions 工作流校验
 │   ├── ui.test.js            # 浏览器端到端测试（puppeteer-core）
 │   ├── sources.test.js       # 各音源可用性检查
 │   └── screenshot.mjs        # 生成文档截图

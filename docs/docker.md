@@ -203,3 +203,112 @@ docker images music-room
 | 端口占用 | 占用宿主机 3000 | 占用宿主机映射的端口 |
 | 隔离性 | 无 | 容器隔离 |
 | 开机自启 | 需手动 | `--restart unless-stopped` |
+
+---
+
+## GitHub Actions 自动构建
+
+仓库已配置 `.github/workflows/docker-publish.yml`，推送代码后会自动构建镜像
+并推送到 **GitHub Container Registry (GHCR)**。
+
+### 触发条件
+
+| 事件 | 行为 |
+| --- | --- |
+| 推送到 `master` / `main` | 构建并推送镜像 |
+| 推送 `v*` 标签 | 构建并推送镜像 |
+| 拉取请求 (PR) | **只构建不推送**，并验证容器能否正常启动 |
+| 手动触发 | 构建并推送镜像 |
+
+### 生成的镜像标签
+
+| 标签 | 示例 | 说明 |
+| --- | --- | --- |
+| `latest` | `ghcr.io/urarattas/music_room:latest` | 主分支最新 |
+| `master` | `...:master` | 分支名 |
+| `v1.2.3` | `...:v1.2.3` | 推送的 git 标签 |
+| `1.2` / `1.2.3` | `...:1.2` | 从语义化标签推导 |
+| `sha-a1b2c3d` | `...:sha-a1b2c3d` | 每次提交都可追溯 |
+| `pr-123` | `...:pr-123` | PR 分支（仅构建） |
+
+### 权限说明
+
+**不需要配置任何 secret。** 工作流使用 GitHub 内置的 `GITHUB_TOKEN`：
+
+```yaml
+permissions:
+  contents: read
+  packages: write
+```
+
+`GITHUB_TOKEN` 的权限由仓库设置里的
+**Settings → Actions → General → Workflow permissions** 决定。
+如果默认是 "Read repository contents permissions"，需要改成
+**"Read and write permissions"**，否则推送镜像会失败。
+
+> 工作流里已显式声明 `permissions`，把授予范围限制在推送镜像所需的最小权限。
+
+### 拉取镜像
+
+镜像默认是**私有**的。拉取前需要登录：
+
+```bash
+echo $GITHUB_TOKEN | docker login ghcr.io -u urarattas --password-stdin
+docker pull ghcr.io/urarattas/music_room:latest
+```
+
+想让镜像公开：在
+**Packages → music_room → Package settings → Change visibility → Public**。
+
+### 首次使用步骤
+
+1. 把代码推到 GitHub（触发第一次构建）
+2. 打开仓库的 **Actions** 标签页，确认 `Docker Image` 运行成功
+3. 打开 **Packages**，找到 `music_room` 包
+4. 需要公开就把可见性改为 Public
+
+### 另有一个 CI 工作流
+
+`.github/workflows/ci.yml` 在每次推送和 PR 时运行测试，
+包括**真正执行一次 `docker build`** 来验证 Dockerfile 可用。
+两个工作流相互独立：CI 失败不会阻止镜像构建。
+
+### 多架构镜像
+
+构建同时产出 `linux/amd64` 与 `linux/arm64`，
+所以同一份镜像能在 x86 服务器和树莓派 / ARM 云主机上运行。
+
+---
+
+## 推送到 Docker Hub（可选）
+
+如果想同时推送到 Docker Hub，需要配置两个 secret：
+
+| Secret | 内容 |
+| --- | --- |
+| `DOCKERHUB_USERNAME` | Docker Hub 用户名 |
+| `DOCKERHUB_TOKEN` | Docker Hub Access Token |
+
+然后在 `docker-publish.yml` 的登录步骤后加一段：
+
+```yaml
+      - name: 登录 Docker Hub
+        uses: docker/login-action@v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+```
+
+并在 `metadata-action` 的 `images` 里加上 Docker Hub 镜像名：
+
+```yaml
+          images: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+            <你的用户名>/music-room
+```
+
+构建步骤的 `push` 条件也要改成：
+
+```yaml
+          push: ${{ github.event_name != 'pull_request' && secrets.DOCKERHUB_USERNAME != '' }}
+```

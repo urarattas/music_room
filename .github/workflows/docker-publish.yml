@@ -1,0 +1,119 @@
+# ============================================================
+#  构建并推送 Docker 镜像到 GitHub Container Registry (GHCR)
+#
+#  触发时机：
+#    - 推送到 master / main 分支
+#    - 推送任意标签（tag）
+#    - 手动触发（workflow_dispatch）
+#
+#  生成的标签：
+#    latest                 —— 分支推送 / 手动触发
+#    <tag>                  —— 推送标签时
+#    sha-<短commit>         —— 每次提交都有的可追溯标签
+#    pr-<PR号>              —— PR 提交（仅构建不推送）
+# ============================================================
+
+name: Docker Image
+
+on:
+  push:
+    branches: [master, main]
+    tags: ['v*']
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+# 只有推送到主分支或打了标签时才推送镜像；
+# 拉取请求只做构建校验，不推送
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ---------- 1. 检出代码 ----------
+      - name: 检出代码
+        uses: actions/checkout@v7.0.1
+
+      # ---------- 2. 设置 Buildx ----------
+      # Buildx 提供多架构构建与缓存支持
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4.4.1
+
+      # ---------- 3. 登录 GHCR ----------
+      # 用内置的 GITHUB_TOKEN，无需配置任何 secret
+      - name: 登录 GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ---------- 4. 生成镜像标签与元数据 ----------
+      - name: 生成镜像元数据
+        id: meta
+        uses: docker/metadata-action@v6.2.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch            # master -> master
+            type=ref,event=tag               # v1.2.3 -> v1.2.3
+            type=ref,event=pr                # pr-123
+            type=semver,pattern={{version}}   # v1.2.3 -> 1.2.3
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short             # sha-a1b2c3d
+          labels: |
+            org.opencontainers.image.title=音乐听歌房 Music Room
+            org.opencontainers.image.description=在线多人音乐听歌房，浏览器直连 GD 音乐台 API，WebRTC P2P 语音 + 文字聊天
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.vendor=${{ github.repository_owner }}
+
+      # ---------- 5. 构建并推送 ----------
+      - name: 构建并推送镜像
+        uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          file: ./Dockerfile
+          # 同时构建 amd64（x86_64）与 arm64（aarch64）
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          # 本地加载镜像，方便 PR 里做启动验证
+          load: ${{ github.event_name == 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # 用 GitHub Actions 缓存加速构建
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ---------- 6. PR 时验证镜像能正常启动 ----------
+      - name: 验证镜像可正常启动
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "启动容器并检查健康检查接口…"
+          docker run -d --name music-room-test -p 3000:3000 \
+            ${{ steps.meta.outputs.tags }}
+          sleep 5
+          curl -fsS http://127.0.0.1:3000/api/health
+          echo ""
+          docker logs music-room-test
+          docker rm -f music-room-test
+
+      # ---------- 7. 推送后输出镜像地址 ----------
+      - name: 输出镜像地址
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "镜像已推送："
+          echo "  ${{ steps.meta.outputs.tags }}"
+          echo ""
+          echo "拉取方式："
+          echo "  docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"

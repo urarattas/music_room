@@ -25,7 +25,10 @@ for (const rel of mdFiles) {
     const links = [...text.matchAll(/\[[^\]]*\]\(([^)#][^)]*)\)/g)].map((m) => m[1]);
     for (const link of links) {
       if (/^https?:/.test(link)) continue; // 外链跳过
-      const target = path.resolve(path.dirname(path.join(ROOT, rel)), link);
+      // 去掉 #锚点，只校验文件路径
+      const filePart = link.split('#')[0];
+      if (!filePart) continue; // 纯锚点链接
+      const target = path.resolve(path.dirname(path.join(ROOT, rel)), filePart);
       assert.ok(
         fs.existsSync(target),
         `${rel} 中的链接 "${link}" 指向的文件不存在`
@@ -39,6 +42,35 @@ test('README 提到所有三种启动方式', () => {
   assert.match(text, /start\.bat/, '应提到 Windows 脚本');
   assert.match(text, /start\.sh/, '应提到 Linux/macOS 脚本');
   assert.match(text, /docker compose/, '应提到 Docker');
+});
+
+test('带锚点的链接能对应到真实标题', () => {
+  // GitHub 锚点规则：标题转小写，空格转连字符，保留中文
+  const toAnchor = (heading) =>
+    heading
+      .trim()
+      .toLowerCase()
+      .replace(/[^\w\u4e00-\u9fa5 -]/g, '')
+      .replace(/\s+/g, '-');
+
+  for (const rel of mdFiles) {
+    const text = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    // 抓取形如 [文字](路径#锚点) 的链接
+    const links = [...text.matchAll(/\[[^\]]*\]\(([^)]*)\)/g)].map((m) => m[1]);
+    for (const link of links) {
+      if (!link.includes('#')) continue;
+      const [filePart, anchor] = link.split('#');
+      if (!filePart || !anchor) continue;
+      const target = path.resolve(path.dirname(path.join(ROOT, rel)), filePart);
+      if (!fs.existsSync(target)) continue; // 文件不存在由另一个测试负责
+      const targetText = fs.readFileSync(target, 'utf8');
+      const targetHeadings = [...targetText.matchAll(/^#{1,6}\s+(.+)$/gm)].map((m) => toAnchor(m[1]));
+      assert.ok(
+        targetHeadings.includes(anchor),
+        `${rel} 指向 ${filePart}#${anchor}，但该文件里没有对应标题`
+      );
+    }
+  }
 });
 
 test('README 说明开麦需要 HTTPS', () => {

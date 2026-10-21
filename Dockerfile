@@ -48,6 +48,14 @@ COPY server ./server
 COPY public ./public
 COPY package.json ./
 
+# OCI 元数据：让镜像在 GHCR / Docker Hub 上显示来源与说明，
+# 并把容器包与本仓库关联起来（GITHUB_TOKEN 推送时需要这个标签）
+LABEL org.opencontainers.image.title="音乐听歌房 Music Room" \
+      org.opencontainers.image.description="在线多人音乐听歌房：浏览器直连 GD 音乐台 API，WebRTC P2P 语音 + 文字聊天" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.source="https://github.com/urarattas/music_room" \
+      org.opencontainers.image.vendor="urarattas"
+
 # 以非 root 用户运行
 USER node
 
