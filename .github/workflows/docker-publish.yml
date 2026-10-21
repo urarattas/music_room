@@ -58,19 +58,32 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # ---------- 4. 生成镜像标签与元数据 ----------
+      #
+      # 注意：tags 里的每一行都不能带行尾注释！
+      # metadata-action 会先把整行按逗号切分，再按 `=` 切分，
+      # 行尾的 `# master -> master` 会被当成 event 值的一部分，
+      # 导致 `Invalid event for type=ref,event=branch` 报错。
+      # 所以说明一律写在独立注释行里。
       - name: 生成镜像元数据
         id: meta
         uses: docker/metadata-action@v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # master -> master
+          # v1.2.3 -> v1.2.3
+          # PR -> pr-123
+          # v1.2.3 -> 1.2.3
+          # v1.2.3 -> 1.2
+          # 主分支 -> latest
+          # 每次提交 -> sha-a1b2c3d
           tags: |
-            type=ref,event=branch            # master -> master
-            type=ref,event=tag               # v1.2.3 -> v1.2.3
-            type=ref,event=pr                # pr-123
-            type=semver,pattern={{version}}   # v1.2.3 -> 1.2.3
+            type=ref,event=branch
+            type=ref,event=tag
+            type=ref,event=pr
+            type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,format=short             # sha-a1b2c3d
+            type=sha,format=short
           labels: |
             org.opencontainers.image.title=音乐听歌房 Music Room
             org.opencontainers.image.description=在线多人音乐听歌房，浏览器直连 GD 音乐台 API，WebRTC P2P 语音 + 文字聊天

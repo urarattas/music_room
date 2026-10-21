@@ -159,6 +159,31 @@ proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 
 ## 常见问题
 
+### CI 报错：Invalid event for type=ref,event=branch
+
+`docker/metadata-action` 的 `tags` 里**不能带行尾注释**。
+
+这个 action 会先把每一行按逗号切分，再按 `=` 切分，**不会剥离 `#` 注释**。
+所以这行会出错：
+
+```yaml
+tags: |
+  type=ref,event=branch            # master -> master   ← 报错
+```
+
+`event` 的值会变成 `branch            # master -> master`，
+校验时对不上 `branch`，于是抛 `Invalid event`。
+
+正确写法是把说明放到独立注释行：
+
+```yaml
+tags: |
+  # master -> master
+  type=ref,event=branch
+```
+
+`labels` 块不受影响 —— 它不做 `=` 切分，整行原样使用。
+
 ### 端口被占用
 
 ```bash
