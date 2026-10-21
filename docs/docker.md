@@ -191,6 +191,31 @@ docker compose up -d
 docker images music-room
 ```
 
+### CI 报错：Unable to locate executable file: pnpm
+
+说明 `actions/setup-node` 的 `cache: pnpm` 跑在 pnpm 安装之前了。
+`setup-node` 需要执行 `pnpm store path` 定位缓存目录，此时 pnpm 还不存在。
+
+修法：把 `pnpm/action-setup` 挪到 `actions/setup-node` **前面**，
+并去掉 `setup-node` 里的 `cache: pnpm`（缓存交给 `pnpm/action-setup`）。
+详见上方「关于 pnpm 的安装顺序」。
+
+### CI 报错：推送镜像时 denied / 403
+
+说明 `GITHUB_TOKEN` 缺少 `packages: write` 权限。
+去 **Settings → Actions → General → Workflow permissions**，
+把 "Workflow permissions" 改成 **"Read and write permissions"**。
+
+### CI 报错：403 Forbidden（拉取镜像时）
+
+GHCR 的包默认是私有的。要么登录：
+
+```bash
+echo $GITHUB_TOKEN | docker login ghcr.io -u urarattas --password-stdin
+```
+
+要么把包改成公开：**Packages → music_room → Package settings → Change visibility → Public**。
+
 ---
 
 ## 与本机运行的对比
@@ -272,6 +297,44 @@ docker pull ghcr.io/urarattas/music_room:latest
 `.github/workflows/ci.yml` 在每次推送和 PR 时运行测试，
 包括**真正执行一次 `docker build`** 来验证 Dockerfile 可用。
 两个工作流相互独立：CI 失败不会阻止镜像构建。
+
+### 关于 pnpm 的安装顺序（踩过的坑）
+
+CI 里安装 pnpm 有个**顺序要求**，搞反了会报：
+
+```
+Unable to locate executable file: pnpm
+```
+
+原因是 `actions/setup-node` 的 `cache: pnpm` 需要执行 `pnpm store path`
+来定位缓存目录 —— 如果此时 pnpm 还没装好就会失败。
+
+正确做法是用 `pnpm/action-setup` 装 pnpm（它自带缓存能力），
+并**放在 setup-node 之前**：
+
+```yaml
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v6.1.0
+        with:
+          version: 11.28.6
+          run_install: false
+          cache: true
+          cache_dependency_path: pnpm-lock.yaml
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 22
+        # 注意：这里不要再写 cache: pnpm
+```
+
+pnpm 版本由 `package.json` 的 `packageManager` 字段统一声明：
+
+```json
+"packageManager": "pnpm@11.28.6"
+```
+
+本地与 CI 用同一个版本，避免 lockfile 格式被不同版本改写。
 
 ### 多架构镜像
 

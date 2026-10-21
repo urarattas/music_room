@@ -139,3 +139,83 @@ test('CI 与 Docker 构建是两个独立 workflow', () => {
   // CI 不应有 packages: write，避免不必要的权限
   assert.notEqual(ci.permissions?.packages, 'write', 'CI 不需要 packages 权限');
 });
+
+test('pnpm 在需要它之前就已安装', () => {
+  // setup-node 的 cache: pnpm 需要执行 `pnpm store path`，
+  // 若此时 pnpm 未安装会报 "Unable to locate executable file: pnpm"。
+  const wf = readWf('ci.yml');
+  const job = Object.values(wf.jobs)[0];
+  const steps = job.steps;
+
+  const pnpmSetupIdx = steps.findIndex(
+    (s) => (s.uses || '').startsWith('pnpm/action-setup@') || /corepack enable/.test(s.run || '')
+  );
+  assert.ok(pnpmSetupIdx >= 0, '应有安装 pnpm 的步骤');
+
+  // setup-node 若启用了 pnpm 缓存，必须排在 pnpm 安装之后
+  const setupNodeIdx = steps.findIndex((s) => (s.uses || '').startsWith('actions/setup-node@'));
+  if (setupNodeIdx >= 0) {
+    const setupNode = steps[setupNodeIdx];
+    const cache = setupNode.with?.cache;
+    if (cache === 'pnpm') {
+      assert.ok(
+        pnpmSetupIdx < setupNodeIdx,
+        'setup-node 启用 cache: pnpm 时，pnpm 必须先安装'
+      );
+    }
+  }
+
+  // 所有用到 pnpm 命令的 run 步骤，都必须在 pnpm 安装之后
+  const firstPnpmUse = steps.findIndex((s) => /\bpnpm\s+(install|run|exec)\b/.test(s.run || ''));
+  if (firstPnpmUse >= 0) {
+    assert.ok(
+      pnpmSetupIdx < firstPnpmUse,
+      `执行 pnpm 命令的步骤（第 ${firstPnpmUse + 1} 步）必须在安装 pnpm 之后`
+    );
+  }
+});
+
+test('pnpm 缓存由 pnpm/action-setup 提供，不依赖 setup-node', () => {
+  const wf = readWf('ci.yml');
+  const job = Object.values(wf.jobs)[0];
+  const steps = job.steps;
+
+  const pnpmSetup = steps.find((s) => (s.uses || '').startsWith('pnpm/action-setup@'));
+  assert.ok(pnpmSetup, '应使用 pnpm/action-setup 安装 pnpm');
+  // YAML 里 true 会被解析成布尔，GitHub Actions 两种都接受
+  const cache = pnpmSetup.with?.cache;
+  assert.ok(
+    cache === true || cache === 'true',
+    `应启用 pnpm 缓存，实际 ${JSON.stringify(cache)}`
+  );
+  assert.equal(pnpmSetup.with?.cache_dependency_path, 'pnpm-lock.yaml');
+
+  // setup-node 不应再配 cache: pnpm（那正是报错的来源）
+  const setupNode = steps.find((s) => (s.uses || '').startsWith('actions/setup-node@'));
+  if (setupNode) {
+    assert.notEqual(
+      setupNode.with?.cache,
+      'pnpm',
+      'setup-node 不应配置 cache: pnpm，缓存交给 pnpm/action-setup'
+    );
+  }
+});
+
+test('package.json 声明了 packageManager 字段', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  assert.ok(pkg.packageManager, '应声明 packageManager 以统一 pnpm 版本');
+  assert.match(pkg.packageManager, /^pnpm@\d+\.\d+\.\d+$/);
+});
+
+test('CI 使用的 pnpm 版本与 package.json 一致', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  const wf = readWf('ci.yml');
+  const job = Object.values(wf.jobs)[0];
+  const pnpmSetup = job.steps.find((s) => (s.uses || '').startsWith('pnpm/action-setup@'));
+  const expected = pkg.packageManager.split('@')[1];
+  assert.equal(
+    pnpmSetup.with?.version,
+    expected,
+    'CI 安装的 pnpm 版本应与 package.json 的 packageManager 一致'
+  );
+});

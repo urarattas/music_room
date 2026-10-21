@@ -30,14 +30,23 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v7.0.1
 
+      # ---------- 安装 pnpm（必须在 setup-node 之前）----------
+      # setup-node 的 cache: pnpm 需要执行 `pnpm store path` 才能定位缓存目录，
+      # 如果此时 pnpm 还没装好，就会报
+      # "Unable to locate executable file: pnpm"。
+      # pnpm/action-setup 自带缓存能力（cache: true），所以不再让 setup-node 管缓存。
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v6.1.0
+        with:
+          version: 11.28.6
+          run_install: false
+          cache: true
+          cache_dependency_path: pnpm-lock.yaml
+
       - name: 安装 Node.js
         uses: actions/setup-node@v7.1.0
         with:
           node-version: 22
-          cache: pnpm
-
-      - name: 安装 pnpm
-        run: corepack enable
 
       - name: 安装依赖
         run: pnpm install --frozen-lockfile
@@ -58,10 +67,14 @@ jobs:
         run: node test/docker-runtime.test.js
 
       # ---------- 集成测试 ----------
-      # 其中 3 项会访问上游 GD 音乐台 API，上游限流时可能失败，
-      # 因此单独重试一次再判定
+      # 其中 3 项会访问上游 GD 音乐台 API。上游限流或临时不可用时会失败，
+      # 这类失败重试一次往往就能过（上游 503 多为间歇性）。
+      # 若重试后仍失败，说明确实是代码问题，此时才判定为失败。
       - name: 集成测试
-        run: node --test --test-timeout=30000 test/integration.test.js
+        run: |
+          node --test --test-timeout=30000 test/integration.test.js \
+            || (echo "首次运行失败，等待 30 秒后重试…" && sleep 30 \
+                && node --test --test-timeout=30000 test/integration.test.js)
 
       # ---------- Docker 构建校验 ----------
       # 真正执行 docker build，确保 Dockerfile 能构建成功
