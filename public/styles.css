@@ -10,9 +10,48 @@
   --danger: #ff5b6e;
   --ok: #35d07f;
   --radius: 12px;
+
+  /* 滚动条统一配色 */
+  --scroll-track: transparent;
+  --scroll-thumb: #333c4d;
+  --scroll-thumb-hover: #46536b;
+  --scroll-thumb-active: var(--accent);
+  --scroll-size: 8px;
 }
 
 * { box-sizing: border-box; }
+
+/* ------------------------------ 滚动条（全局统一） ------------------------------ */
+/* 细窄、低对比、悬停才明显 —— 与整体深色主题一致 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) var(--scroll-track);
+}
+*::-webkit-scrollbar {
+  width: var(--scroll-size);
+  height: var(--scroll-size);
+}
+*::-webkit-scrollbar-track {
+  background: var(--scroll-track);
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 999px;
+  /* 留出边距，让滑条看起来更纤细 */
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover);
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:active {
+  background: var(--scroll-thumb-active);
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-corner {
+  background: var(--scroll-track);
+}
 
 html, body {
   margin: 0;
@@ -223,6 +262,26 @@ html, body {
 .np-artist { color: #a8b2c6; font-size: 14px; }
 .np-album { color: var(--text-dim); font-size: 12px; margin-top: 4px; }
 
+/* 音质选择 */
+.np-quality {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.np-quality-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+.np-quality-hint { font-size: 11px; color: var(--text-dim); }
+.np-quality-hint.ok { color: var(--ok); }
+.np-quality-hint.err { color: var(--danger); }
+.select-sm { padding: 4px 8px; font-size: 12px; border-radius: 7px; }
+
 .player-controls { display: flex; align-items: center; gap: 16px; justify-content: center; }
 .btn-round {
   width: 42px; height: 42px; border-radius: 50%;
@@ -253,7 +312,7 @@ html, body {
   border-radius: 10px;
   padding: 10px 12px;
 }
-.lyric-tabs { display: flex; gap: 6px; flex-shrink: 0; }
+.lyric-tabs { display: flex; gap: 6px; flex-shrink: 0; justify-content: center; }
 .lyric-tab {
   background: transparent;
   border: 1px solid var(--border);
@@ -265,16 +324,30 @@ html, body {
 }
 .lyric-tab.active { color: var(--accent); border-color: var(--accent); }
 .lyric-list {
+  position: relative;      /* 作为滚动容器，offsetTop 才相对于它 */
   flex: 1;
   min-height: 60px;
   overflow-y: auto;
+  overflow-x: hidden;
   font-size: 13px;
   line-height: 1.9;
   text-align: center;
   color: var(--text-dim);
+  /* 上下留白由 JS 动态补足（_ensurePadding），
+     保证首行/末行也能滚动到正中 */
+  padding-top: 0;
+  padding-bottom: 0;
 }
-.lyric-line { padding: 1px 0; transition: color .15s; }
-.lyric-line.active { color: var(--accent); font-weight: 600; }
+.lyric-line {
+  padding: 1px 0;
+  transition: color .15s, opacity .2s;
+  opacity: .75;
+}
+.lyric-line.active {
+  color: var(--accent);
+  font-weight: 600;
+  opacity: 1;
+}
 .lyric-empty { color: var(--text-dim); padding: 20px 0; }
 
 /* ------------------------------ 成员与聊天 ------------------------------ */

@@ -136,7 +136,7 @@ const search = new SearchPanel({
 
 ```js
 const loader = new CoverLoader({ concurrency: 3 });
-loader.push(img, { source: 'netease', pic_id: '10995...', size: 300 }, priority);
+loader.push(img, { source: 'netease', pic_id: '10995...', size: 300 }, priority, opts);
 ```
 
 - 封面地址由 `gdApi.getTrackPic()` 直连上游获取，图片再从上游 CDN 直接加载，
@@ -145,6 +145,9 @@ loader.push(img, { source: 'netease', pic_id: '10995...', size: 300 }, priority)
 - 按 `priority` 排序（数字越小越先），当前播放的封面 priority = 0。
 - `isVisible(el, container, margin)` 判断元素是否在容器可视区域内，
   搜索列表据此**只为可见条目**请求封面，滚动时再补。
+- **同一个 `<img>` 可以重复加载**：`push(..., { reload: true })` 会强制重新取地址。
+  主封面复用同一个元素，切歌时必须这样才能换成新图 —— 否则会一直显示上一首的封面。
+- 取地址期间若已切歌，过期结果会被丢弃（用 `coverKey` 校验）。
 
 ## `lyrics.js` — `export class LyricPanel`
 
@@ -152,10 +155,21 @@ loader.push(img, { source: 'netease', pic_id: '10995...', size: 300 }, priority)
 const panel = new LyricPanel({ listEl, tabsEl });
 panel.setLyrics({ lyric, tlyric });   // LRC 原文与翻译
 panel.update(posMs);                  // 高亮当前行并居中滚动
+panel.refresh();                      // 重新居中（尺寸变化后）
 panel.clear();
 export function parseLrc(lrc);            // → [{time, text}]
 export function matchTranslation(lines, tLines);  // → Map<time, text>
 ```
+
+### 居中显示的两个关键点
+
+1. **用 `getBoundingClientRect` 而不是 `offsetTop`**。
+   `offsetTop` 是相对 `offsetParent` 的偏移，歌词容器必须设
+   `position: relative`，否则它相对的是页面而非滚动容器，滚动位置会完全跑偏。
+2. **上下补足留白**（`_ensurePadding`）。
+   歌词总高度可能小于容器高度（只有几行、或容器很高），
+   这时首行永远在顶部、无法居中。补上「半个容器高」的上下 padding 后，
+   任何一行都能被滚到中央。容器尺寸变化时由 `ResizeObserver` 重新补白。
 
 - **翻译对齐**：上游的原文与翻译时间戳不一定完全相同 —— 实测有的歌两者相差
   50ms（如原文 `[00:01.000]` 对应翻译 `[00:01.050]`）。

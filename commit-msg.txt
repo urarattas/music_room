@@ -1,0 +1,46 @@
+fix(ui): 修复封面不同步、歌词不居中，统一滚动条样式，音质选择移到歌曲下方
+
+问题 1 切歌后封面未同步更换
+根因：CoverLoader.push() 里有 if (img.dataset.coverState) return，
+主封面复用同一个 <img> 元素，切歌后状态已是 loaded 直接 return，
+于是封面永远停在上一首。
+修复：用 source:pic_id:size 作为 coverKey 标识具体图片；
+push(..., { reload: true }) 强制重新取地址；取地址期间若已切歌，
+用 coverKey 校验丢弃过期结果，避免旧图覆盖新图。
+
+问题 2 当前歌词不在正中
+根因：居中计算用了 target.offsetTop，但 .lyric-list 没有
+position: relative，offsetTop 相对的是页面而非滚动容器，
+算出来的滚动位置完全跑偏。
+修复：改用 getBoundingClientRect 计算相对偏移；
+给 .lyric-list 加 position: relative。
+另外补了一个场景：歌词总高度小于容器高度时（只有几行或容器很高），
+首行永远在顶部无法居中 —— 由 _ensurePadding() 动态补足上下留白，
+并用 ResizeObserver 在容器尺寸变化时重新补白与居中。
+歌词加载完成、切换原文/翻译后也会重新定位。
+
+问题 3 滚动条太丑
+修复：新增全局滚动条样式，Firefox 用 scrollbar-width/scrollbar-color，
+Chrome/Safari 用 ::-webkit-scrollbar 伪元素，
+配色统一为 CSS 变量（--scroll-thumb 等），细窄 8px、圆角、
+悬停/按下有反馈。歌词面板、歌单列表、搜索结果、聊天区全部生效。
+
+问题 4 音质选项位置与生效方式
+- 把音质选择器从搜索表单移到当前歌曲信息下方（歌名/歌手/专辑之下）
+- 切换后立即用新音质重新向上游取直链，并接着原位置播放
+  （_resumeAt 记住位置，loadedmetadata 时跳回）
+- 提示状态：正在获取… / 已切换为 XXX / 该音质不可用
+- 新增 Hi-Res(999) 选项
+
+测试
+- 新增 test/ui-fixes.test.js：14 项，用本地模拟上游（不依赖真实
+  GD 音乐台，且不受其限流影响）验证封面同步、歌词居中偏差 0px、
+  音质切换确实带新 br 重新取地址
+- 新增 test/scrollbar.test.js：7 项，校验各滚动容器的统一样式
+- 新增 test/make-png.mjs：生成测试用 PNG
+- test/resilience.test.js 改为用必定 503 的本地模拟上游，
+  结果不再随真实上游状态变化（原先上游恢复后会误报失败）
+
+CI 补充运行 ui-fixes 与 scrollbar 两个套件。
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>

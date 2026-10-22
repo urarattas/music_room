@@ -13,6 +13,8 @@ export class LyricPanel {
     this.lines = []; // [{ time, text }]
     this.translation = new Map(); // time -> text
     this.activeIndex = -1;
+    /** 最近一次播放位置，用于歌词重新加载后恢复高亮 */
+    this.lastPosMs = undefined;
 
     tabsEl?.addEventListener('click', (e) => {
       const btn = e.target.closest('.lyric-tab');
@@ -22,7 +24,19 @@ export class LyricPanel {
         t.classList.toggle('active', t === btn);
       }
       this._render();
+      // 切换标签后重新定位到当前行
+      this.activeIndex = -1;
+      if (this.lastPosMs !== undefined) this.update(this.lastPosMs);
     });
+
+    // 容器尺寸变化（窗口缩放、布局变化）后重新补白与居中
+    if (typeof ResizeObserver !== 'undefined' && this.listEl) {
+      this._resizeObserver = new ResizeObserver(() => {
+        this._ensurePadding();
+        this.refresh('auto');
+      });
+      this._resizeObserver.observe(this.listEl);
+    }
   }
 
   /** @param {{lyric:string, tlyric:string}} data */
@@ -31,6 +45,10 @@ export class LyricPanel {
     this.translation = matchTranslation(this.lines, parseLrc(data?.tlyric || ''));
     this.activeIndex = -1;
     this._render();
+    // 新歌词加载后，把当前播放位置对应的行滚到正中
+    if (this.lastPosMs !== undefined) {
+      this.update(this.lastPosMs);
+    }
   }
 
   clear() {
@@ -61,6 +79,7 @@ export class LyricPanel {
       empty.className = 'lyric-empty';
       empty.textContent = '暂无歌词';
       this.listEl.appendChild(empty);
+      this._ensurePadding();
       return;
     }
     for (const l of this._source()) {
@@ -70,10 +89,12 @@ export class LyricPanel {
       div.textContent = l.text || '♪';
       this.listEl.appendChild(div);
     }
+    this._ensurePadding();
   }
 
   /** 根据当前播放位置高亮歌词 */
   update(posMs) {
+    this.lastPosMs = posMs;
     if (!this.lines.length) return;
     const t = posMs / 1000;
     let idx = -1;
@@ -89,10 +110,58 @@ export class LyricPanel {
     const target = children[idx];
     if (!target) return;
     target.classList.add('active');
-    // 居中滚动
+    this._scrollToCenter(target);
+  }
+
+  /**
+   * 把指定行滚动到可视区域的垂直中央。
+   *
+   * 用 getBoundingClientRect 计算，而不是 offsetTop ——
+   * offsetTop 是相对 offsetParent 的偏移，当容器没有 position: relative 时
+   * 它相对的是页面而非滚动容器，算出来的滚动位置会完全跑偏。
+   */
+  _scrollToCenter(target, behavior = 'smooth') {
     const box = this.listEl;
-    const top = target.offsetTop - box.clientHeight / 2 + target.offsetHeight / 2;
-    box.scrollTo({ top, behavior: 'smooth' });
+    if (!box) return;
+    const boxRect = box.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    if (!boxRect.height) return;
+
+    // 目标行相对容器顶部的偏移，加上要回退的「半个容器高度 - 半个行高」
+    const offsetInBox = targetRect.top - boxRect.top + box.scrollTop;
+    const top = offsetInBox - box.clientHeight / 2 + targetRect.height / 2;
+
+    // 首行/末行内容不足以滚到正中时，浏览器会自动夹到边界，
+    // 这里显式夹一次，避免"差很多"的偏移
+    const maxTop = Math.max(0, box.scrollHeight - box.clientHeight);
+    const clamped = Math.max(0, Math.min(maxTop, top));
+
+    // 已经基本居中就不用滚了，避免频繁触发动画
+    if (Math.abs(box.scrollTop - clamped) < 2) return;
+    box.scrollTo({ top: clamped, behavior });
+  }
+
+  /**
+   * 在歌词列表上下补足空白，让首行/末行也能滚到正中。
+   *
+   * 歌词总高度可能小于容器高度（比如只有几行、或容器很高），
+   * 这时首行永远在顶部，无法居中。
+   * 补上「半个容器高」的上 padding 与同样多的下 padding 后，
+   * 任何一行都能被滚到中央。
+   */
+  _ensurePadding() {
+    const box = this.listEl;
+    if (!box) return;
+    const pad = Math.max(0, Math.floor(box.clientHeight / 2) - 20);
+    box.style.paddingTop = `${pad}px`;
+    box.style.paddingBottom = `${pad}px`;
+  }
+
+  /** 歌词内容变化后（如切歌、切换标签页）重新居中当前行 */
+  refresh(behavior = 'auto') {
+    if (this.activeIndex < 0) return;
+    const target = this.listEl?.children?.[this.activeIndex];
+    if (target) this._scrollToCenter(target, behavior);
   }
 }
 

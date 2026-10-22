@@ -29,6 +29,8 @@
     "test:workflow": "node --test test/workflow.test.js",
     "test:metadata": "node --test test/metadata-action.test.js",
     "test:ui": "node test/ui.test.js",
+    "test:ui:fixes": "node test/ui-fixes.test.js",
+    "test:scrollbar": "node test/scrollbar.test.js",
     "test:sources": "node test/sources.test.js",
     "screenshot": "node test/screenshot.mjs"
   },

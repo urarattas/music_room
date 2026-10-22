@@ -73,12 +73,6 @@
               <option value="joox">Joox</option>
               <option value="bilibili">B站</option>
             </select>
-            <select id="quality" class="select" title="音质（各客户端独立生效）">
-              <option value="128">128K</option>
-              <option value="192">192K</option>
-              <option value="320" selected>320K</option>
-              <option value="740">无损</option>
-            </select>
             <button class="btn btn-primary" type="submit">搜索</button>
           </form>
           <div id="search-status" class="hint"></div>
@@ -105,6 +99,19 @@
             <div id="np-title" class="np-title">未在播放</div>
             <div id="np-artist" class="np-artist">—</div>
             <div id="np-album" class="np-album">—</div>
+
+            <!-- 音质选择：放在当前歌曲信息下方，切换后立即重新获取对应音质的直连 -->
+            <div class="np-quality">
+              <span class="np-quality-label">音质</span>
+              <select id="quality" class="select select-sm" title="音质（仅影响本客户端）">
+                <option value="128">128K</option>
+                <option value="192">192K</option>
+                <option value="320" selected>320K</option>
+                <option value="740">无损</option>
+                <option value="999">Hi-Res</option>
+              </select>
+              <span id="quality-hint" class="np-quality-hint"></span>
+            </div>
           </div>
         </div>
 

@@ -76,6 +76,13 @@ jobs:
       - name: 房间成员清理测试
         run: node test/room-cleanup.test.js
 
+      # ---------- 界面专项（用本地模拟上游，不依赖真实 GD 音乐台）----------
+      - name: 界面专项测试（封面同步 / 歌词居中 / 音质切换）
+        run: node test/ui-fixes.test.js
+
+      - name: 滚动条样式测试
+        run: node test/scrollbar.test.js
+
       # ---------- 集成测试 ----------
       # 其中 3 项依赖上游 GD 音乐台 API。该上游在 Cloudflare 后面，
       # 对数据中心 IP（如 GitHub runner）经常返回 403/400，

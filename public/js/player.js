@@ -31,6 +31,8 @@ export class MusicPlayer extends EventTarget {
     this._url = null;
     /** 取地址的令牌，用于丢弃过期请求 */
     this._loadToken = 0;
+    /** 切换音质后要接着播放的位置（ms） */
+    this._resumeAt = null;
 
     this.audio.volume = this.state.volume;
     this.audio.preload = 'auto';
@@ -39,6 +41,16 @@ export class MusicPlayer extends EventTarget {
       // audio.duration 单位是秒，统一换算成毫秒
       this.duration = Math.max(0, Math.round((this.audio.duration || 0) * 1000));
       this.emit('duration', this.duration);
+      // 切换音质后跳回原来的位置
+      if (this._resumeAt !== null) {
+        const at = this._resumeAt;
+        this._resumeAt = null;
+        try {
+          this.audio.currentTime = at / 1000;
+        } catch {
+          /* 尚未可 seek */
+        }
+      }
       this._applyPosition(true);
     });
     this.audio.addEventListener('timeupdate', () => {
@@ -143,7 +155,7 @@ export class MusicPlayer extends EventTarget {
    * 服务端广播的 track 只有 ID 与元数据，没有播放地址，
    * 这里由本客户端独立向上游取地址，然后直接从上游 CDN 播放。
    */
-  async _loadTrack(track, { force = false } = {}) {
+  async _loadTrack(track, { force = false, pos = null } = {}) {
     const token = ++this._loadToken;
     this._lastTrackId = track?.id ?? null;
 
@@ -186,6 +198,10 @@ export class MusicPlayer extends EventTarget {
       this.audio.src = url;
       this.audio.crossOrigin = 'anonymous';
       this.audio.load();
+      // 切换音质时接着原来的位置播
+      if (pos !== null && Number.isFinite(pos) && pos > 0) {
+        this._resumeAt = pos;
+      }
       this.emit('loaded', { track, url, br, size });
     } catch (err) {
       if (token !== this._loadToken) return;
@@ -198,12 +214,18 @@ export class MusicPlayer extends EventTarget {
     return `${track?.source ?? 'netease'}:${track?.id ?? ''}`;
   }
 
-  /** 重新获取当前曲目的播放地址（例如切换音质后） */
+  /**
+   * 重新获取当前曲目的播放地址（例如切换音质后）。
+   * 会带上当前音质去上游取新的直链。
+   */
   reload() {
     if (!this.state.track) return;
+    // 清掉旧地址，强制重新请求
     this._url = null;
     this._lastLoadedKey = null;
-    this._loadTrack(this.state.track, { force: true });
+    // 记录当前播放位置，重新取到地址后接着播
+    const pos = this.currentPos();
+    this._loadTrack(this.state.track, { force: true, pos });
     if (this.state.playing) this._playWhenReady();
   }
 

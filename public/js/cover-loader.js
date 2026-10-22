@@ -27,14 +27,32 @@ export class CoverLoader {
    * @param {HTMLImageElement} img
    * @param {{source:string,pic_id:string}} track
    * @param {number} priority 数字越小越优先
-   * @param {{removeOnError?:boolean}} opts
+   * @param {{removeOnError?:boolean, reload?:boolean}} opts
+   *   reload=true 时强制重新加载（用于主封面：切歌后同一个 <img> 要换成新图）
    */
   push(img, track, priority = 10, opts = {}) {
     if (!img || !track?.pic_id) return;
-    if (img.dataset.coverState) return; // 已在队列或已加载
+
+    // 同一张图已加载过，且不要求重载 → 跳过
+    const key = `${track.source}:${track.pic_id}:${track.size || 300}`;
+    if (!opts.reload && img.dataset.coverKey === key && img.dataset.coverState === 'loaded') {
+      return;
+    }
+    // 已经排队的是同一张图 → 不重复排队
+    if (!opts.reload && img.dataset.coverState === 'queued' && img.dataset.coverKey === key) {
+      return;
+    }
+
     img.dataset.coverState = 'queued';
-    this.queue.push({ img, track, priority, removeOnError: opts.removeOnError !== false });
-    this.queue.sort((a, b) => a.priority - b.priority);
+    img.dataset.coverKey = key;
+    this.queue.push({
+      img,
+      track,
+      priority,
+      key,
+      removeOnError: opts.removeOnError !== false,
+    });
+    this.queue.sort((a, b) => a.priority - b.priority || (a.key < b.key ? -1 : 1));
     this._schedule();
   }
 
@@ -58,23 +76,31 @@ export class CoverLoader {
     }
   }
 
-  async _load({ img, track, removeOnError }) {
+  async _load({ img, track, key, removeOnError }) {
     const { source, pic_id: picId } = track;
     const size = track.size || 300;
+
     img.dataset.coverState = 'loading';
     img.onerror = () => {
+      // 期间可能已经切歌了，别把新曲目的状态改坏
+      if (img.dataset.coverKey !== key) return;
       img.dataset.coverState = 'error';
       if (removeOnError) img.remove();
     };
     img.onload = () => {
+      if (img.dataset.coverKey !== key) return;
       img.dataset.coverState = 'loaded';
     };
+
     try {
       // 浏览器直连上游取封面地址
       const { url } = await gdApi.getTrackPic({ source, id: picId, size });
       if (!url) throw new Error('no cover');
+      // 取地址期间可能已切歌，丢弃过期结果
+      if (img.dataset.coverKey !== key) return;
       img.src = url;
     } catch {
+      if (img.dataset.coverKey !== key) return;
       img.dataset.coverState = 'error';
       if (removeOnError) img.remove();
     }

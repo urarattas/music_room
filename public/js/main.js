@@ -29,6 +29,7 @@ const el = {
   searchInput: $('search-input'),
   searchSource: $('search-source'),
   quality: $('quality'),
+  qualityHint: $('quality-hint'),
   searchStatus: $('search-status'),
   searchResults: $('search-results'),
   playlist: $('playlist'),
@@ -151,6 +152,9 @@ const lyrics = new LyricPanel({ listEl: el.lyricList, tabsEl: el.lyricTabs });
 /** 当前加载歌词的曲目，避免重复请求 */
 let lyricTrackId = null;
 
+/** 当前主封面对应的曲目，用于判断是否需要换图 */
+let lastCoverKey = null;
+
 client.knownUsers = [];
 client.on('open', () => setConnState(true));
 client.on('close', () => setConnState(false));
@@ -221,17 +225,26 @@ el.btnPlay.onclick = () => player.toggle();
 el.btnPrev.onclick = () => client.send('playlist.prev', {});
 el.btnNext.onclick = () => client.send('playlist.next', {});
 
-// 音质：每个客户端独立生效，不影响房间内其他人
+// 音质：每个客户端独立生效，不影响房间内其他人。
+// 切换后立即按新音质重新向��游取直链。
 el.quality.addEventListener('change', () => {
   const br = Number(el.quality.value) || 320;
   player.quality = br;
   localStorage.setItem('mr_quality', String(br));
-  // 重新获取当前曲目的播放地址
-  if (player.state.track) {
-    player.reload();
+
+  if (!player.state.track) {
+    setQualityHint('已切换，下次播放生效', '');
+    return;
   }
-  el.micHint.textContent = `音质已切换为 ${el.quality.selectedOptions[0].textContent}`;
+  setQualityHint('正在获取…', '');
+  // reload 会带上新音质重新取地址，并接着当前位置播放
+  player.reload();
 });
+
+function setQualityHint(text, cls = '') {
+  el.qualityHint.textContent = text;
+  el.qualityHint.className = 'np-quality-hint' + (cls ? ` ${cls}` : '');
+}
 
 let seeking = false;
 el.seek.addEventListener('pointerdown', () => (seeking = true));
@@ -276,12 +289,21 @@ player.on('state', (state) => {
   el.npAlbum.textContent = t ? t.album || '—' : '—';
   el.volume.value = Math.round((state.volume ?? 1) * 100);
   el.volumeLabel.textContent = `${el.volume.value}%`;
-  if (t?.pic_id) {
-    // 当前播放的封面优先级最高
-    coverLoader.push(el.cover, { source: t.source, pic_id: t.pic_id, size: 500 }, 0);
+
+  // 封面：切歌后必须换成新图，所以总是强制重新加载
+  const picKey = t?.pic_id ? `${t.source}:${t.pic_id}` : null;
+  if (picKey && picKey !== lastCoverKey) {
+    lastCoverKey = picKey;
+    coverLoader.push(
+      el.cover,
+      { source: t.source, pic_id: t.pic_id, size: 500 },
+      0,
+      { reload: true, removeOnError: false }
+    );
     el.cover.classList.add('visible');
     el.coverPlaceholder.style.display = 'none';
-  } else {
+  } else if (!picKey) {
+    lastCoverKey = null;
     el.cover.classList.remove('visible');
     el.coverPlaceholder.style.display = 'flex';
   }
@@ -302,6 +324,14 @@ player.on('time', (pos) => {
 
 player.on('track', (track) => {
   loadLyrics(track);
+});
+
+// 播放地址就绪：如果是切音质触发的，给出成功提示
+player.on('loaded', ({ br }) => {
+  const label = el.quality?.selectedOptions?.[0]?.textContent ?? '';
+  if (br) {
+    setQualityHint(`已切换为 ${label}`, 'ok');
+  }
 });
 
 /** 拉取并展示歌词（浏览器直连上游，不经服务端） */
@@ -332,6 +362,10 @@ player.on('error', (e) => {
   el.micHint.textContent = msg;
   el.searchStatus.textContent = `⚠ ${msg}`;
   el.searchStatus.style.color = 'var(--danger)';
+  // 取地址失败 → 画质切换没成功
+  if (el.qualityHint?.textContent?.includes('正在获取')) {
+    setQualityHint('该音质不可用', 'err');
+  }
   console.warn('[player]', msg);
 });
 
